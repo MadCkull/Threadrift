@@ -121,9 +121,13 @@ export default function MySpatialStory() {
 
 - **Trackpad / Mouse Wheel**: Scroll forward / backward along the currently active path.
 - **Node & Edge Clicking**:
-  - *Editor OFF*: Clicks set your path intent towards the clicked node/path (activates when stopped at a junction).
-  - *Editor ON*: Clicks select nodes/edges for property inspection and live dragging.
+  - *Editor OFF*: Path changes are accepted only when scrolling is completely at rest on a node: input is idle and both the target and camera progress have snapped to that exact node.
+  - Only routes reachable forward from the resting node can be selected. The travelled path through that node is preserved; clicks between nodes, while settling, or toward a fork already passed do nothing. This applies at every branch depth.
+  - Clicking an edge selects that specific connection, including at merges. Clicking a node already on the active path does not move the camera or rewrite the route.
+  - *Editor ON*: Clicks select nodes/edges for property inspection and live dragging without also changing the navigation route.
 - **Touch / Mobile**: Single-finger swipe up/down/left/right follows branching path vectors.
+
+Gesture-driven branch changes use the same complete-rest rule. Returning to a fork and fully settling there allows a different branch to be selected again.
 
 ---
 

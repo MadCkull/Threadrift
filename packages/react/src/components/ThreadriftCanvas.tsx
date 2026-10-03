@@ -28,6 +28,7 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({
   const visitedNodes = useThreadrift((s) => s.visitedNodes);
   const selectNode = useThreadrift((s) => s.selectNode);
   const focusNode = useThreadrift((s) => s.focusNode);
+  const focusEdge = useThreadrift((s) => s.focusEdge);
   const selectEdge = useThreadrift((s) => s.selectEdge);
   const editorOpen = useThreadrift((s) => s.editorOpen);
   const selectedNode = useThreadrift((s) => s.selectedNode);
@@ -156,8 +157,9 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({
                   e.stopPropagation();
                   if (editorOpen) {
                     selectEdge(id);
+                  } else {
+                    focusEdge(id);
                   }
-                  focusNode(edge.to);
                 }}
               />
             );
@@ -207,8 +209,9 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({
                       window.addEventListener('pointermove', onMove);
                       window.addEventListener('pointerup', onUp);
                     }
+                  } else {
+                    focusNode(id);
                   }
-                  focusNode(id);
                 }
               }}
             />

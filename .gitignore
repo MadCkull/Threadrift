@@ -38,3 +38,8 @@ Thumbs.db
 # Temporary / Cache
 *.tsbuildinfo
 .eslintcache
+/graphify-out
+PROJECT_CONTEXT.md
+/project-notes
+/packages/react/tests
+AGENTS.md

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useContext } from "react";
 import Lenis from "lenis";
 import { useThreadrift, ThreadriftContext } from "../context/ThreadriftContext";
+import { getRestingNodeIndex } from "../store/navigation";
 import { 
   SCROLL_IDLE_TIMEOUT,
   SNAP_DEAD_ZONE,
@@ -18,11 +19,6 @@ export function ThreadriftNavigation() {
   const storeApi = useContext(ThreadriftContext);
 
   // Zustand bindings
-  const graph = useThreadrift((s) => s.graph);
-  const activePath = useThreadrift((s) => s.activePath);
-  const branchChoices = useThreadrift((s) => s.branchChoices);
-  
-  const scrollTarget = useThreadrift((s) => s.scrollTarget);
   const setScrollTarget = useThreadrift((s) => s.setScrollTarget);
   const setScrollCurrent = useThreadrift((s) => s.setScrollCurrent);
   const setIsScrolling = useThreadrift((s) => s.setIsScrolling);
@@ -56,11 +52,14 @@ export function ThreadriftNavigation() {
   // Handle Wheel + Touch Events (Custom Physics)
   useEffect(() => {
     function processGesture(dx: number, dy: number, sensitivity: number, preventDefault: () => void) {
+      if (!storeApi) return;
+      const state = storeApi.getState();
+      const { graph, activePath, branchChoices } = state;
       if (!graph.nodes || activePath.length === 0) return;
 
       preventDefault();
 
-      const currentScrollTarget = storeApi!.getState().scrollTarget;
+      const currentScrollTarget = state.scrollTarget;
 
       // Snap dead zone: if snapped to a node, ignore small movements
       const isSnapped = Math.abs(currentScrollTarget - Math.round(currentScrollTarget)) < 0.01;
@@ -70,20 +69,16 @@ export function ThreadriftNavigation() {
       }
 
       // Branch Detection & Path Locking
-      const isStrictlyAtNode = Math.abs(currentScrollTarget - Math.round(currentScrollTarget)) < 0.05;
-      const wasAtRest = !storeApi!.getState().isScrolling;
-
-      setIsScrolling(true);
+      const restingIndex = getRestingNodeIndex(state);
       if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current);
 
       // Determine base movement
-      const currentIdx = Math.max(0, Math.min(Math.round(currentScrollTarget), activePath.length - 1));
-      const currentNode = activePath[currentIdx];
+      const currentNode = restingIndex === null ? undefined : activePath[restingIndex];
 
       // Default to vertical scrolling driving forward/backward progress
       let movement = dy * sensitivity;
 
-      if (currentNode && isStrictlyAtNode && wasAtRest) {
+      if (currentNode) {
         const { edgeId, type } = detectBranchIntent(
           dx,
           dy,
@@ -114,10 +109,12 @@ export function ThreadriftNavigation() {
       }
 
       // Update scroll target
-      const maxScroll = activePath.length - 1;
+      // A branch choice can change path length synchronously on this gesture.
+      const maxScroll = storeApi.getState().activePath.length - 1;
       let newTarget = currentScrollTarget + movement;
       newTarget = Math.max(0, Math.min(newTarget, maxScroll));
       
+      setIsScrolling(true);
       setScrollTarget(newTarget);
 
       // Setup magnetic snap timeout
@@ -170,12 +167,13 @@ export function ThreadriftNavigation() {
     window.addEventListener("touchend", handleTouchEnd);
     
     return () => {
+      if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current);
       window.removeEventListener("wheel", handleWheel);
       window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [activePath, graph, branchChoices, setIsScrolling, setBranchChoice, setScrollTarget, storeApi]);
+  }, [setIsScrolling, setBranchChoice, setScrollTarget, storeApi]);
 
   // Handle Animation Loop (Snapping and Current Interpolation)
   useEffect(() => {

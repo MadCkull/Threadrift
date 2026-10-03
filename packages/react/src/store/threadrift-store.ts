@@ -3,6 +3,7 @@
 // ============================================================
 
 import { type StateCreator } from "zustand";
+import { getRestingNodeIndex, resolvePathSelection, selectForwardPath } from "./navigation";
 
 import {
   type GraphData,
@@ -90,6 +91,7 @@ export interface ThreadriftStore {
   selectNode: (id: number | null) => void;
   selectEdge: (id: string | null) => void;
   focusNode: (id: number) => void;
+  focusEdge: (id: string) => void;
   toggleEditor: () => void;
   setMergeMode: (sourceId: number | null) => void;
 
@@ -450,16 +452,21 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   setIsScrolling: (val) => set({ isScrolling: val }),
 
   setBranchChoice: (nodeId, edgeId) => {
-    set((state) => {
-      const choices = { ...state.branchChoices };
-      if (edgeId) {
-        choices[nodeId] = edgeId;
-      } else {
-        delete choices[nodeId];
-      }
-      return { branchChoices: choices };
-    });
-    get().refreshActivePath();
+    const state = get();
+    const restingIndex = getRestingNodeIndex(state);
+    if (restingIndex === null) return;
+    const choiceIndex = state.activePath.findIndex((node) => node.id === nodeId);
+    if (choiceIndex < restingIndex) return;
+    if (edgeId !== null && !state.graph.edges.some(
+      (edge) => edge.id === edgeId && edge.from === nodeId && state.graph.nodes[edge.to]
+    )) return;
+    if ((state.branchChoices[nodeId] ?? null) === edgeId) return;
+
+    const choices = { ...state.branchChoices };
+    if (edgeId !== null) choices[nodeId] = edgeId;
+    else delete choices[nodeId];
+    const selection = resolvePathSelection(state, choices);
+    if (selection) set(selection);
   },
 
   refreshActivePath: () => {
@@ -471,45 +478,13 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   // ── UI Actions ──────────────────────────────────────────
 
   focusNode: (id) => {
-    const { graph, scrollTarget, activePath, isScrolling } = get();
+    const selection = selectForwardPath(get(), { nodeId: id });
+    if (selection) set(selection);
+  },
 
-    // STRICT CONDITION: Only allow path change if scroll is at COMPLETE REST on a node
-    const currentIdx = Math.round(scrollTarget);
-    const isAtRest = !isScrolling && Math.abs(scrollTarget - currentIdx) < 0.001;
-    
-    if (!isAtRest) {
-      return; // Do not change path if user is moving or between nodes
-    }
-
-    // Check if the node is already on the active path and behind us — if so, do nothing
-    const existingIdx = activePath.findIndex((n) => n.id === id);
-    if (existingIdx !== -1 && existingIdx <= currentIdx) {
-      // Node is already passed — don't do anything
-      return;
-    }
-
-    // Trace path from root to the target node (BFS shortest path through the graph)
-    const pathEdges: GraphEdge[] = [];
-    let curr = id;
-    let safeguard = 1000;
-    while (curr !== graph.root && safeguard > 0) {
-      safeguard--;
-      const incoming = graph.edges.find((e) => e.to === curr);
-      if (!incoming) break;
-      pathEdges.unshift(incoming);
-      curr = incoming.from;
-    }
-
-    // Update branch choices to make this path active
-    set((state) => {
-      const choices = { ...state.branchChoices };
-      for (const edge of pathEdges) {
-        choices[edge.from] = edge.id;
-      }
-      return { branchChoices: choices };
-    });
-
-    get().refreshActivePath();
+  focusEdge: (id) => {
+    const selection = selectForwardPath(get(), { edgeId: id });
+    if (selection) set(selection);
   },
 
   selectNode: (id) => set({ selectedNode: id, selectedEdge: null }),
