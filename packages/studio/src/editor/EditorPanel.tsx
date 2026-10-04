@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useThreadrift } from "@threadrift/react";
 import { NodeTab } from "./NodeTab";
 import { EdgeTab } from "./EdgeTab";
 import { GlobalTab } from "./GlobalTab";
 import { AnchorTab } from "./AnchorTab";
+import { CameraToolbar } from "./CameraControls";
 import {
   CircleDot,
   Spline,
@@ -40,6 +41,7 @@ export function EditorPanel() {
   const autoTab: TabId = selectedEdge ? "edge" : selectedNode !== null ? "node" : "node";
   const [manualTab, setManualTab] = useState<TabId | null>(null);
   const activeTab = manualTab ?? autoTab;
+  useEffect(() => { setManualTab(null); }, [selectedNode, selectedEdge]);
 
   const handleTabClick = (id: TabId) => {
     setManualTab(id);
@@ -58,7 +60,7 @@ export function EditorPanel() {
             stiffness: 300,
             mass: 0.8,
           }}
-          className="fixed top-0 right-0 z-[150] h-full w-80 
+          className="fixed top-0 right-0 z-[150] h-full w-80 max-w-full
             bg-black/70 backdrop-blur-2xl border-l border-white/5 
             flex flex-col overflow-hidden shadow-2xl shadow-black/80 pointer-events-auto"
         >
@@ -79,6 +81,7 @@ export function EditorPanel() {
             </button>
           </div>
 
+          <CameraToolbar />
           {/* Merge Mode Banner */}
           {mergeModeSource !== null && (
             <div className="mx-4 mt-3 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 
@@ -97,7 +100,7 @@ export function EditorPanel() {
               <button
                 key={tab.id}
                 onClick={() => handleTabClick(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-all cursor-pointer ${
+                className={`flex flex-1 min-w-0 flex-col items-center gap-1 px-1 py-2 rounded-md text-xs transition-colors cursor-pointer ${
                   activeTab === tab.id
                     ? "bg-zinc-800/80 text-white border border-white/10"
                     : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40 border border-transparent"

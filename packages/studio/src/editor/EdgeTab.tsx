@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useThreadrift } from "@threadrift/react";
 import { Spline, GitBranch, Trash2 } from "lucide-react";
 import { getLevelColor } from "@threadrift/core";
+import { CommitNumber } from "./CameraControls";
 
 export function EdgeTab() {
   const [curveTarget, setCurveTarget] = useState<"start" | "end">("start");
@@ -150,6 +151,23 @@ export function EdgeTab() {
         </label>
       )}
 
+      <section aria-label="Camera transition" className="flex flex-col gap-3">
+        <label className="flex flex-col gap-2 text-xs text-zinc-400">Camera travel
+          <select aria-label="Camera travel" value={edge.camera?.mode ?? "path"}
+            onChange={event => updateEdge(edge.id, { camera: { mode: event.target.value as "path" | "direct", start: edge.camera?.start ?? 0, end: edge.camera?.end ?? 1 } })}
+            className="rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-zinc-100">
+            <option value="path">Follow path shape</option><option value="direct">Direct between views</option>
+          </select>
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <CommitNumber label="Move starts (%)" value={(edge.camera?.start ?? 0) * 100} min={0} max={99.9} step={1}
+            onCommit={value => updateEdge(edge.id, { camera: { mode: edge.camera?.mode ?? "path", start: value / 100, end: edge.camera?.end ?? 1 } })} />
+          <CommitNumber label="Move ends (%)" value={(edge.camera?.end ?? 1) * 100} min={.1} max={100} step={1}
+            onCommit={value => updateEdge(edge.id, { camera: { mode: edge.camera?.mode ?? "path", start: edge.camera?.start ?? 0, end: value / 100 } })} />
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-500">Percentages refer to travel along this connection. The view holds before and after the movement window. Matching saved views hold throughout.</p>
+        {edge.camera && <button type="button" onClick={() => updateEdge(edge.id, { camera: undefined })} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300">Reset camera travel</button>}
+      </section>
       {/* Divider */}
       <div className="h-px bg-white/5" />
 

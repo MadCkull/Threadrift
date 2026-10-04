@@ -56,6 +56,12 @@ Persistence verification on 2026-10-04: 33 core, 87 React (61 navigation + 26 pe
 
 Verification on 2026-10-04: React unit suite 61/61 passed; Chromium/Edge browser scenarios 18/18 passed; Firefox and WebKit each passed 15/15 executed scenarios, with three CDP touch scenarios explicitly skipped. Firefox required launch outside this session's process sandbox. The new cases cover automatic continuation, persisted recommendations, continuous touch movement beyond its initial capture threshold, a rapid second backward swipe, the fixed reverse pause, and compact optional route controls. These results do not replace the physical-device matrix below.
 
+## Camera verification (2026-10-04)
+
+The final production build passed 27/27 Chromium/Edge browser scenarios with no skips, including saved camera return/reload, cancellation, independent view positioning, numeric and slider edits, narrow keyboard controls, reduced motion, viewport culling and touch commit/cancel. The final React suite passed 98/98 tests. Core passed 41/41 and the disk/API suite passed 12/12; five isolated real-disk browser scenarios passed, including camera centers and edge timing across save/reload. Library/declaration and production builds passed. New camera behavior has not been rerun in Firefox/WebKit or on physical devices; earlier engine results above apply to their dated navigation baseline.
+
+See [CAMERA.md](../../../CAMERA.md) for the authoring and document contract. Navigation evidence is under `.turbo/browser-artifacts/chromium/`; persistence evidence is under `.turbo/browser-artifacts/persistence/`. All persistence writes used the separate `.turbo` fixture, and the user's graph hash remained unchanged.
+
 ## Physical input acceptance
 
 On each available mouse, trackpad, or phone:

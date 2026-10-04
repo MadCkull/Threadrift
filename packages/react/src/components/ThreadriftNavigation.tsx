@@ -2,6 +2,7 @@
 
 import { useEffect, useContext } from "react";
 import { CAMERA_SCALE } from "@threadrift/core";
+import { cameraNavigationBlocked } from "../store/camera-state";
 import { useThreadrift, ThreadriftContext } from "../context/ThreadriftContext";
 import { DRAG_THRESHOLD_PX, WHEEL_QUIET_MS, WheelSessionTracker, WheelReversePause, isFreshReverseWheelIntent, isNavigationSurface, normalizeWheelDelta, shouldCancelPointerCapture } from "../input/native-input";
 
@@ -29,7 +30,7 @@ export function ThreadriftNavigation() {
       return Math.max(0.01, CAMERA_SCALE * Math.max(rect.width, rect.height) / 1000);
     };
     const selectedText = () => !!window.getSelection()?.toString();
-    const isOwned = (event: Event) => !event.defaultPrevented && !store.getState().nodeDragActive &&
+    const isOwned = (event: Event) => !event.defaultPrevented && !store.getState().nodeDragActive && !cameraNavigationBlocked(store.getState()) &&
       isNavigationSurface(event.target, element) && !selectedText();
     const cancel = () => {
       if (wheelTimer) clearTimeout(wheelTimer);
@@ -87,7 +88,7 @@ export function ThreadriftNavigation() {
         wheelTimer = undefined;
       }, WHEEL_QUIET_MS);
       // Modifier zoom and events owned elsewhere are never cancelled. Stop graph motion too.
-      if (zoom || !event.cancelable || !isNavigationSurface(event.target, element) || state.nodeDragActive) {
+      if (zoom || !event.cancelable || !isNavigationSurface(event.target, element) || state.nodeDragActive || cameraNavigationBlocked(state)) {
         if (zoom) store.getState().cancelInput();
         else if (wheelSession !== null) store.getState().endInput(wheelSession);
         wheelSession = null;
@@ -227,7 +228,7 @@ export function ThreadriftNavigation() {
     };
     const visibility = () => { if (document.hidden) cancel(); };
     const unsubscribe = store.subscribe((next, previous) => {
-      if (next.graphRevision !== previous.graphRevision || (next.editorOpen && !previous.editorOpen)) cancel();
+      if (next.graphRevision !== previous.graphRevision || next.cameraMode !== previous.cameraMode || (next.editorOpen && !previous.editorOpen)) cancel();
       else if (reversePauseSession !== null && next.inputSession?.id === reversePauseSession &&
         next.inputSession.blocked && next.scrollCurrent === next.scrollTarget) reversePause.start(performance.now());
     });

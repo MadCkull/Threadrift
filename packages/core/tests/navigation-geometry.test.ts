@@ -207,7 +207,7 @@ test("document migrates legacy exports, strips computed fields and preserves aut
   legacy.edges[1].diverge = -.2;
   const before = JSON.stringify(legacy);
   const document = parseGraphDocument(legacy);
-  assert.equal(document.version, "3.0");
+  assert.equal(document.version, "4.0");
   assert.deepEqual(document.settings, DEFAULT_DOCUMENT_SETTINGS);
   assert.equal(JSON.stringify(legacy), before);
   for (const node of Object.values(document.nodes)) for (const field of ["level", "seqId", "parentSeqId", "vx", "vy"]) assert.equal(Object.hasOwn(node, field), false);
@@ -259,7 +259,7 @@ test("anchor width roundtrips and v3 rejects scaling while migrating older ancho
     old.nodes[0].anchorX = 0; old.nodes[0].anchorY = -12;
     old.nodes[0].anchorWidth = 480;
     const migrated = parseGraphDocument(old);
-    assert.equal(migrated.version, "3.0");
+    assert.equal(migrated.version, "4.0");
     assert.equal(migrated.nodes[0].anchorWidth, 480);
     assert.equal(migrated.nodes[0].anchorX, 0);
     assert.equal(migrated.nodes[0].anchorY, -12);
@@ -275,7 +275,7 @@ test("anchor width roundtrips and v3 rejects scaling while migrating older ancho
 });
 
 test("document rejects unknown versions, durable fields, settings and out-of-range numbers", () => {
-  for (const version of ["0.9", "4.0", "", 2, null]) assert.throws(() => parseGraphDocument({ ...graph(), version }), /version/);
+  for (const version of ["0.9", "5.0", "", 2, null]) assert.throws(() => parseGraphDocument({ ...graph(), version }), /version/);
   for (const key of Object.keys(PHYSICS_BOUNDS)) for (const value of [NaN, Infinity, -1, 20, "0.1", null]) {
     assert.throws(() => parseGraphDocument({ ...graph(), settings: { physics: { [key]: value } } }), /finite|between/);
   }

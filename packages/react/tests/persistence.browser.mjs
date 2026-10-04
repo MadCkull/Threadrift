@@ -90,8 +90,8 @@ try {
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Persistence audit fork');
   await page.getByRole('textbox', { name: 'Content', exact: true }).fill('Durable text\nUnicode: café 🎯');
   await page.getByLabel('Recommended path', { exact: false }).selectOption('e-1-7');
-  await slider(/^X\s/, 715);
-  await slider(/^Y\s/, 355);
+  await slider(/Node X slider/, 715);
+  await slider(/Node Y slider/, 355);
   await page.getByRole('button', { name: 'Anchors', exact: true }).click();
   await slider(/Offset X/, -123); await slider(/Offset Y/, 88); await page.getByRole('spinbutton', { name: /Anchor Width/ }).fill('420');
   const edge = page.locator('[data-threadrift-edge="e-1-7"]');
@@ -117,7 +117,7 @@ try {
   assert.deepEqual([savedEdge.curve, savedEdge.curveEnd, savedEdge.diverge], [-.24, .31, -.12]);
   assert.deepEqual(saved.settings.physics, { scrollSensitivity: .0023, touchSensitivity: .0034, snapStrength: .27, snapThreshold: .34 });
   assert.equal(saved.settings.editor.autoSaveEnabled, false);
-  assert.equal(saved.version, '3.0');
+  assert.equal(saved.version, '4.0');
   for (const node of Object.values(saved.nodes)) for (const key of ['level', 'seqId', 'parentSeqId', 'vx', 'vy']) assert.equal(key in node, false);
   results.push({ name: 'Every editable node, anchor, curve and physics field reaches real disk', status: 'passed' });
 
@@ -144,6 +144,39 @@ try {
   await page.unroute('**/api/graph'); await saveNow();
   await waitDisk(data => data.settings.physics.snapStrength === .29);
   results.push({ name: 'Failed save remains visible and manual retry persists changes', status: 'passed' });
+  await page.getByRole('checkbox', { name: 'Autosave', exact: true }).uncheck();
+  await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
+  await page.getByRole('combobox', { name: 'View destination', exact: true }).selectOption('1');
+  await page.getByRole('button', { name: 'Node', exact: true }).click();
+  const beforeCamera = await disk();
+  await page.getByRole('spinbutton', { name: 'Node X', exact: true }).fill('765'); await page.keyboard.press('Enter');
+  await page.getByRole('spinbutton', { name: 'Camera X', exact: true }).fill('640'); await page.keyboard.press('Enter');
+  await page.getByRole('spinbutton', { name: 'Camera Y', exact: true }).fill('320'); await page.keyboard.press('Enter');
+  assert.deepEqual((await disk()).nodes[1], beforeCamera.nodes[1], 'Autosave off preserves disk during camera authoring');
+  await page.getByRole('button', { name: 'Return to route', exact: true }).click(); await page.waitForTimeout(240);
+  const cameraEdge = page.locator('[data-threadrift-edge="e-1-7"]');
+  const cameraEdgePoint = await cameraEdge.evaluate(path => {
+    const point = path.getPointAtLength(path.getTotalLength() * .2).matrixTransform(path.getScreenCTM()); return { x: point.x, y: point.y };
+  });
+  await page.mouse.click(cameraEdgePoint.x, cameraEdgePoint.y);
+  await page.getByRole('button', { name: 'Edge', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Camera travel', exact: true }).selectOption('direct');
+  await page.getByRole('spinbutton', { name: 'Move starts (%)', exact: true }).fill('20'); await page.keyboard.press('Enter');
+  await page.getByRole('spinbutton', { name: 'Move ends (%)', exact: true }).fill('80'); await page.keyboard.press('Enter');
+  await settings(); await saveNow();
+  const cameraSaved = await waitDisk(data => data.nodes[1].camera?.x === 640);
+  assert.equal(cameraSaved.nodes[1].x, 765); assert.deepEqual(cameraSaved.nodes[1].camera, { x: 640, y: 320 });
+  assert.deepEqual(cameraSaved.edges.find(edge => edge.id === 'e-1-7').camera, { mode: 'direct', start: .2, end: .8 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.locator('.threadrift-route-controls').getByRole('button', { name: /^Next/ }).click();
+  await page.waitForTimeout(1600);
+  const resolved = await page.locator('[data-threadrift-camera]').evaluate(el => {
+    const rect = el.ownerSVGElement.getBoundingClientRect();
+    const point = new DOMPoint(rect.x + rect.width / 2, rect.y + rect.height / 2).matrixTransform(el.getScreenCTM().inverse());
+    return { x: point.x, y: point.y };
+  });
+  assert(Math.hypot(resolved.x - 640, resolved.y - 320) < .08);
+  results.push({ name: 'Node/view pair and edge camera timing survive actual disk writes and browser reload', status: 'passed' });
   assert.deepEqual(errors, []);
   await page.screenshot({ path: resolve(output, 'settings-saved.png') });
 } catch (error) {

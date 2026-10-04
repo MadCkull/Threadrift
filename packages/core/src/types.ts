@@ -11,6 +11,9 @@ export interface GraphNode {
   x: number;
   y: number;
 
+  /** Fixed world-space viewport center on arrival. Absent means follow this node. */
+  camera?: Point;
+
   /** Optional author-selected default exit. Omit to choose a continuation geometrically. */
   recommendedEdgeId?: string;
 
@@ -38,6 +41,15 @@ export interface GraphEdge {
   curve: number;
   curveEnd?: number;
   diverge?: number;
+  /** Camera travel along this edge; progress remains graph arc-length based. */
+  camera?: CameraTransition;
+}
+
+export interface CameraTransition {
+  mode: "path" | "direct";
+  /** Fractions of edge travel. Outside this window the view holds at an endpoint. */
+  start: number;
+  end: number;
 }
 
 /** The full Threadrift graph data object */
@@ -77,7 +89,7 @@ export interface DocumentSettings {
 /** Canonical durable document. Runtime topology and navigation never belong here. */
 export type DocumentNode = Omit<GraphNode, "level" | "seqId" | "parentSeqId" | "vx" | "vy" | "anchorScale">;
 export interface GraphDocument extends GraphJSON {
-  version: "3.0";
+  version: "4.0";
   nodes: Record<string, DocumentNode>;
   settings: DocumentSettings;
 }

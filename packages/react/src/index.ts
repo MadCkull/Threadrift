@@ -2,6 +2,7 @@ export { Threadrift } from "./components/Root";
 export { useThreadrift, useThreadriftApi, ThreadriftContext, ThreadriftProvider } from "./context/ThreadriftContext";
 export type { ThreadriftStore } from "./store/threadrift-store";
 export { createThreadriftStore } from "./store/threadrift-store";
+export { resolveCamera } from "./store/camera-state";
 export { ThreadriftCanvas } from "./components/ThreadriftCanvas";
 export { ThreadriftNavigation } from "./components/ThreadriftNavigation";
 export { createInputRecorder } from "./input/native-input";

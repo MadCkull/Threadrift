@@ -7,3 +7,4 @@ export * from "./topology";
 export * from "./validation";
 export * from "./route-geometry";
 export * from "./document";
+export * from "./camera";

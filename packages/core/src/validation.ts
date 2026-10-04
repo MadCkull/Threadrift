@@ -1,5 +1,6 @@
 import type { GraphData, GraphJSON, GraphNode } from "./types";
 import { documentShapeIssues } from "./document-schema";
+import { isCameraView, isCameraTransition } from "./camera";
 
 /** Below one millionth of a graph unit there is no useful navigable segment. */
 export const MIN_TRAVEL_LENGTH = 1e-6;
@@ -36,6 +37,7 @@ export function validateGraphData(value: unknown): GraphData {
     }
     if (typeof node.name !== "string" || typeof node.content !== "string") issues.push(`node ${key} needs string name and content`);
     if (!finite(node.x) || !finite(node.y)) issues.push(`node ${key} coordinates must be finite`);
+    if (node.camera !== undefined && !isCameraView(node.camera)) issues.push(`node ${key}.camera must contain x/y within +/-1e9`);
     for (const field of ["anchorX", "anchorY", "anchorWidth", "anchorScale"]) {
       if (node[field] !== undefined && !finite(node[field])) issues.push(`node ${key}.${field} must be finite`);
     }
@@ -57,6 +59,7 @@ export function validateGraphData(value: unknown): GraphData {
     }
     if (edge.type !== "main" && edge.type !== "branch") issues.push(`edge ${label} type must be main or branch`);
     if (!finite(edge.curve)) issues.push(`edge ${label}.curve must be finite`);
+    if (edge.camera !== undefined && !isCameraTransition(edge.camera)) issues.push(`edge ${label}.camera needs path/direct mode and 0 <= start < end <= 1 (minimum window .001)`);
     for (const field of ["curveEnd", "diverge"]) {
       if (edge[field] !== undefined && !finite(edge[field])) issues.push(`edge ${label}.${field} must be finite`);
     }

@@ -569,6 +569,163 @@ try {
     await page.getByTitle('Toggle Threadrift Studio').click(); await atNode(page, 0);
   });
 
+  const cameraCenter = page => page.locator('[data-threadrift-camera]').evaluate(el => {
+    const matrix = el.getScreenCTM(), bounds = el.ownerSVGElement.getBoundingClientRect();
+    const point = new DOMPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2).matrixTransform(matrix.inverse());
+    return { x: point.x, y: point.y };
+  });
+  const closePoint = (actual, expected, epsilon = .08) => assert(Math.hypot(actual.x - expected.x, actual.y - expected.y) < epsilon, JSON.stringify({ actual, expected }));
+  async function studio(page) {
+    await page.getByTitle('Toggle Threadrift Studio').click();
+    await page.getByRole('button', { name: 'Freeze camera', exact: true }).waitFor(); await page.waitForTimeout(450);
+  }
+  await run('camera freeze commits node and view together then restores that view on return and reload', async page => {
+    let saved, writes = 0;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { writes++; saved = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); }
+      return route.fulfill({ json: saved ?? browserFixture });
+    });
+    await load(page); await studio(page);
+    const before = await cameraCenter(page), origin = await center(page, 0);
+    await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
+    closePoint(await cameraCenter(page), before);
+    await page.mouse.move(origin.x, origin.y); await page.mouse.down();
+    for (const delta of [20, 50, 80]) {
+      await page.mouse.move(origin.x - delta, origin.y - 30, { steps: 3 }); closePoint(await cameraCenter(page), before);
+    }
+    await page.waitForTimeout(350); assert.equal(writes, 0, 'Unfinished drag must not autosave');
+    await page.mouse.up(); await page.waitForTimeout(450);
+    assert.equal(writes, 1); closePoint(saved.nodes[0].camera, before); assert.notEqual(saved.nodes[0].x, browserFixture.nodes[0].x);
+    closePoint(await cameraCenter(page), before);
+    await wheel(page, 300); closePoint(await cameraCenter(page), before);
+    await page.getByRole('button', { name: 'Return to route', exact: true }).click();
+    await page.getByTitle('Toggle Threadrift Studio').click(); await enabled(next(page));
+    await next(page).click(); await atNode(page, 1); await previous(page).click(); await enabled(next(page));
+    closePoint(await cameraCenter(page), before);
+    await page.reload({ waitUntil: 'networkidle' }); await enabled(next(page)); closePoint(await cameraCenter(page), before);
+    const projected = await page.locator('[data-threadrift-anchor="0"]').evaluate(el => {
+      const html = el.getBoundingClientRect(), node = document.querySelector('[data-threadrift-node="0"]').getBoundingClientRect();
+      return { x: html.x - node.x - node.width / 2, y: html.y - node.y - node.height / 2 };
+    });
+    closePoint(projected, { x: saved.nodes[0].anchorX ?? 24, y: saved.nodes[0].anchorY ?? 24 });
+    await page.screenshot({ path: `${output}/camera-saved-view.png` });
+  });
+
+  await run('camera drag cancellation and later ordinary movement preserve authored views', async page => {
+    let saved;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); }
+      return route.fallback();
+    });
+    await load(page); await studio(page);
+    await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
+    const origin = await center(page, 0), before = await cameraCenter(page);
+    const nodePosition = () => node(page, 0).evaluate(el => el.parentElement.getAttribute('transform'));
+    const initial = await nodePosition();
+    await page.mouse.move(origin.x, origin.y); await page.mouse.down(); await page.mouse.move(origin.x - 60, origin.y - 40, { steps: 4 });
+    await page.keyboard.press('Escape'); await page.mouse.up();
+    assert.equal(await nodePosition(), initial); closePoint(await cameraCenter(page), before);
+    await page.waitForTimeout(350); assert.equal(saved, undefined);
+    await page.getByRole('button', { name: 'Use current view', exact: true }).click();
+    await page.getByRole('button', { name: 'Return to route', exact: true }).click(); await page.waitForTimeout(220);
+    await page.mouse.move(origin.x, origin.y); await page.mouse.down(); await page.mouse.move(origin.x - 50, origin.y - 30, { steps: 4 }); await page.mouse.up();
+    await page.waitForTimeout(450); closePoint(saved.nodes[0].camera, before); closePoint(await cameraCenter(page), before);
+    await page.getByRole('button', { name: 'Reset to Follow', exact: true }).click();
+    await page.getByRole('button', { name: 'Return to route', exact: true }).click(); await page.getByTitle('Toggle Threadrift Studio').click(); await atNode(page, 0);
+  });
+
+  await run('camera positioning pans only the view and numeric framing persists without moving nodes', async page => {
+    let saved;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); }
+      return route.fallback();
+    });
+    await load(page); await studio(page);
+    await page.getByRole('button', { name: 'Position camera', exact: true }).click();
+    const before = await cameraCenter(page), point = await surfacePoint(page);
+    await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.mouse.move(point.x + 80, point.y + 60, { steps: 5 }); await page.mouse.up();
+    assert(Math.hypot((await cameraCenter(page)).x - before.x, (await cameraCenter(page)).y - before.y) > 30);
+    await page.getByRole('button', { name: 'Use current view', exact: true }).click(); await page.waitForTimeout(350);
+    assert.equal(saved.nodes[0].x, browserFixture.nodes[0].x); assert.equal(saved.nodes[0].y, browserFixture.nodes[0].y);
+    await page.getByRole('spinbutton', { name: 'Camera X', exact: true }).fill('-125'); await page.keyboard.press('Enter');
+    await page.getByRole('spinbutton', { name: 'Camera Y', exact: true }).fill('75'); await page.keyboard.press('Enter'); await page.waitForTimeout(350);
+    closePoint(saved.nodes[0].camera, { x: -125, y: 75 }); closePoint(await cameraCenter(page), { x: -125, y: 75 });
+    await page.screenshot({ path: `${output}/camera-studio.png` });
+  });
+
+  await run('camera position sliders cancel cleanly and commit a complete view on release', async page => {
+    let saved, writes = 0;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { writes++; saved = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); }
+      return route.fallback();
+    });
+    await load(page); await studio(page); await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
+    const view = await cameraCenter(page), slider = page.getByRole('slider', { name: 'Node X slider', exact: true });
+    await slider.scrollIntoViewIfNeeded(); const box = await slider.boundingBox();
+    const y = box.y + box.height / 2;
+    await page.mouse.move(box.x + box.width * .5, y); await page.mouse.down(); await page.mouse.move(box.x + box.width * .7, y, { steps: 3 });
+    await page.keyboard.press('Escape'); await page.mouse.move(box.x + box.width * .8, y, { steps: 3 }); await page.mouse.up();
+    await page.waitForTimeout(350); assert.equal(writes, 0); assert.equal(Number(await slider.inputValue()), browserFixture.nodes[0].x);
+    // Cancellation status can change the panel's available height; use its current layout.
+    await slider.scrollIntoViewIfNeeded(); const nextBox = await slider.boundingBox(), nextY = nextBox.y + nextBox.height / 2;
+    await page.mouse.move(nextBox.x + nextBox.width * .5, nextY); await page.mouse.down(); await page.mouse.move(nextBox.x + nextBox.width * .65, nextY, { steps: 3 });
+    await page.waitForTimeout(350); assert.equal(writes, 0); closePoint(await cameraCenter(page), view);
+    await page.mouse.up(); await page.waitForTimeout(350); assert.equal(writes, 1); closePoint(saved.nodes[0].camera, view);
+  });
+
+  await run('camera tools are keyboard accessible in a narrow editor and respect reduced motion', async page => {
+    await load(page); await studio(page);
+    const freeze = page.getByRole('button', { name: 'Freeze camera', exact: true });
+    await freeze.focus(); await page.keyboard.press('Enter'); assert.equal(await freeze.getAttribute('aria-pressed'), 'true');
+    for (const name of ['Node', 'Edge', 'Anchors', 'Settings']) {
+      const box = await page.getByRole('button', { name, exact: true }).boundingBox();
+      assert(box && box.x >= 0 && box.x + box.width <= 391 && box.height >= 40);
+    }
+    await page.getByRole('combobox', { name: 'View destination', exact: true }).selectOption('7');
+    await page.getByRole('button', { name: 'Preview view', exact: true }).click();
+    closePoint(await cameraCenter(page), browserFixture.nodes[7]);
+    await page.getByRole('button', { name: 'Return to route', exact: true }).click();
+    await page.waitForTimeout(40); closePoint(await cameraCenter(page), browserFixture.nodes[0]);
+    await page.screenshot({ path: `${output}/camera-mobile-editor.png` });
+  }, { viewport: { width: 390, height: 844 }, isMobile: true, reducedMotion: 'reduce' });
+
+  await run('camera custom view culling includes nearby nodes and crossing inactive curves', async page => {
+    const fixture = structuredClone(browserFixture);
+    fixture.nodes[0].camera = { x: 10000, y: 10000 };
+    fixture.nodes[90] = { id: 90, name: 'Far A', content: '', x: 7000, y: 10000 };
+    fixture.nodes[91] = { id: 91, name: 'Far B', content: '', x: 13000, y: 10000 };
+    fixture.nodes[92] = { id: 92, name: 'Visible distant node', content: '', x: 10000, y: 10000 };
+    fixture.edges.push({ id: 'crossing', from: 90, to: 91, type: 'main', curve: 0 }); fixture.nextNodeId = 93;
+    await page.route('**/api/graph', route => route.fulfill({ json: fixture }));
+    await page.goto(baseURL, { waitUntil: 'networkidle' }); await enabled(next(page));
+    assert.equal(await node(page, 0).count(), 0); assert.equal(await node(page, 92).count(), 1);
+    assert.equal(await node(page, 90).count(), 0); assert.equal(await node(page, 91).count(), 0);
+    assert.equal(await page.locator('[data-threadrift-edge="crossing"]').count(), 1);
+    closePoint(await cameraCenter(page), fixture.nodes[0].camera);
+    await page.setViewportSize({ width: 500, height: 900 }); await page.waitForTimeout(80);
+    closePoint(await cameraCenter(page), fixture.nodes[0].camera);
+  });
+
+  if (engine === 'chromium') await run('camera touch freeze drag commits and cancellation restores both fields', async (page, context) => {
+    let saved, writes = 0;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); writes++; return route.fulfill({ json: { ok: true } }); }
+      return route.fallback();
+    });
+    await load(page); await studio(page); await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
+    const session = await context.newCDPSession(page), origin = await center(page, 0), view = await cameraCenter(page);
+    await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: origin.x, y: origin.y, id: 1 }] });
+    await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: origin.x - 50, y: origin.y - 40, id: 1 }] });
+    closePoint(await cameraCenter(page), view);
+    await session.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }); await page.waitForTimeout(350);
+    assert.equal(writes, 0); closePoint(await center(page, 0), origin);
+    await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: origin.x, y: origin.y, id: 2 }] });
+    await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: origin.x - 60, y: origin.y - 40, id: 2 }] });
+    await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.waitForTimeout(450);
+    assert.equal(writes, 1); closePoint(saved.nodes[0].camera, view);
+  });
+  else results.push({ name: 'camera touch freeze drag commits and cancellation restores both fields', skipped: true, reason: 'Chromium CDP touch pipeline only.' });
+
   await run('narrow viewport keeps compact controls and optional choices reachable', async page => {
     await crossroads(page, false);
     await page.screenshot({ path: `${output}/mobile-collapsed.png` });

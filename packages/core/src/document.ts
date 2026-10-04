@@ -35,7 +35,7 @@ function assertExtensionObjects(value: Record<string, unknown>): void {
   for (const [path, item] of places) if (isPlainObject(item) && item.extensions !== undefined && !isPlainObject(item.extensions)) throw new GraphValidationError([`${path}.extensions must be a plain object keyed by application namespace`]);
 }
 
-/** Parse v1/v2/v3 input, migrate missing defaults and produce a detached canonical v3 document. */
+/** Parse v1/v2/v3/v4 input, migrate missing defaults and produce a detached canonical v4 document. */
 export function parseGraphDocument(input: unknown): GraphDocument {
   // Inspect descriptors and JSON purity before graph validation can read user-supplied properties.
   const cloned = cloneJSON(input, "document") as unknown;
@@ -48,7 +48,7 @@ export function parseGraphDocument(input: unknown): GraphDocument {
     return [key, clean];
   }));
   const result: GraphDocument = {
-    version: "3.0", nextNodeId: validated.nextNodeId, root: validated.root,
+    version: "4.0", nextNodeId: validated.nextNodeId, root: validated.root,
     nodes, edges: validated.edges,
     settings: {
       physics: { ...DEFAULT_DOCUMENT_SETTINGS.physics, ...validated.settings?.physics },
@@ -84,7 +84,7 @@ export function serializeGraphDocument(input: { graph: GraphData; nextNodeId: nu
     return result;
   };
   return parseGraphDocument({
-    version: "3.0", nextNodeId: input.nextNodeId, root: input.graph.root,
+    version: "4.0", nextNodeId: input.nextNodeId, root: input.graph.root,
     nodes: Object.fromEntries(Object.entries(input.graph.nodes).map(([id, node]) => [id, project(node, NODE_FIELDS, COMPUTED_NODE_FIELDS)])),
     edges: input.graph.edges.map(edge => project(edge, EDGE_FIELDS)), settings: input.settings,
     ...(input.extensions !== undefined ? { extensions: input.extensions } : {}),

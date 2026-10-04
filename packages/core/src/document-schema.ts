@@ -13,9 +13,9 @@ export const DEFAULT_DOCUMENT_SETTINGS: Readonly<DocumentSettings> = Object.free
 
 export const DEFAULT_ANCHOR = Object.freeze({ x: 24, y: 24, width: 320 });
 
-export const NODE_FIELDS = ["id", "name", "content", "x", "y", "anchorX", "anchorY", "anchorWidth", "recommendedEdgeId", "extensions"] as const;
+export const NODE_FIELDS = ["id", "name", "content", "x", "y", "camera", "anchorX", "anchorY", "anchorWidth", "recommendedEdgeId", "extensions"] as const;
 export const COMPUTED_NODE_FIELDS = ["level", "seqId", "parentSeqId", "vx", "vy"] as const;
-export const EDGE_FIELDS = ["id", "from", "to", "type", "curve", "curveEnd", "diverge", "extensions"] as const;
+export const EDGE_FIELDS = ["id", "from", "to", "type", "curve", "curveEnd", "diverge", "camera", "extensions"] as const;
 export const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -34,9 +34,9 @@ export function documentShapeIssues(value: Record<string, unknown>): string[] {
     }
   };
   fields(value, ["version", "root", "nextNodeId", "nodes", "edges", "settings", "extensions"], "document");
-  if (value.version !== "1.0" && value.version !== "2.0" && value.version !== "3.0") issues.push(`unsupported document version ${String(value.version)}`);
-  if (isPlainObject(value.nodes)) for (const [key, node] of Object.entries(value.nodes)) fields(node, [...NODE_FIELDS, ...COMPUTED_NODE_FIELDS, ...(value.version === "1.0" || value.version === "2.0" ? ["anchorScale"] : [])], `node ${key}`);
-  if (Array.isArray(value.edges)) value.edges.forEach((edge, index) => fields(edge, EDGE_FIELDS, `edge ${index}`));
+  if (!["1.0", "2.0", "3.0", "4.0"].includes(value.version as string)) issues.push(`unsupported document version ${String(value.version)}`);
+  if (isPlainObject(value.nodes)) for (const [key, node] of Object.entries(value.nodes)) fields(node, [...NODE_FIELDS.filter(field => field !== "camera" || value.version === "4.0"), ...COMPUTED_NODE_FIELDS, ...(value.version === "1.0" || value.version === "2.0" ? ["anchorScale"] : [])], `node ${key}`);
+  if (Array.isArray(value.edges)) value.edges.forEach((edge, index) => fields(edge, EDGE_FIELDS.filter(field => field !== "camera" || value.version === "4.0"), `edge ${index}`));
   if (value.settings !== undefined) {
     fields(value.settings, ["physics", "editor", "extensions"], "settings");
     if (isPlainObject(value.settings)) {

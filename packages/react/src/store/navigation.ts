@@ -9,16 +9,18 @@ interface NavigationState {
   isScrolling: boolean;
   editorOpen?: boolean;
   inputSession?: unknown;
+  cameraOverride?: unknown;
+  cameraReturn?: unknown;
   activeEdges?: GraphEdge[];
 }
 
 /** The animation loop hard-snaps both values; proximity is not complete rest. */
 export function getRestingNodeIndex(state: Pick<NavigationState,
-  "activePath" | "scrollTarget" | "scrollCurrent" | "isScrolling" | "editorOpen" | "inputSession"
+  "activePath" | "scrollTarget" | "scrollCurrent" | "isScrolling" | "editorOpen" | "inputSession" | "cameraOverride" | "cameraReturn"
 >): number | null {
   const { scrollTarget, scrollCurrent, isScrolling, activePath } = state;
   if (
-    isScrolling || state.editorOpen || state.inputSession ||
+    isScrolling || state.editorOpen || state.inputSession || state.cameraOverride || state.cameraReturn ||
     !Number.isInteger(scrollTarget) ||
     scrollCurrent !== scrollTarget ||
     scrollTarget < 0 ||

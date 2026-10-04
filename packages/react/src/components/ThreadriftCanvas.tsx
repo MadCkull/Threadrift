@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect, useContext } from "react";
+import { memo, useRef, useEffect, useContext, useMemo, useState } from "react";
 import gsap from "gsap";
 import { useThreadrift, ThreadriftContext } from "../context/ThreadriftContext";
 import type { ThreadriftStore } from "../store/threadrift-store";
@@ -7,7 +7,9 @@ import { GraphNodeComponent } from "./GraphNode";
 import { GraphEdgeComponent } from "./GraphEdge";
 import { GraphLabels } from "./GraphLabels";
 import { JunctionControls } from "./JunctionControls";
-import { CANVAS_SIZE, CAMERA_SCALE, sampleRoute, getNode } from "@threadrift/core";
+import { CANVAS_SIZE, CAMERA_SCALE, getNode, type Point } from "@threadrift/core";
+import { resolveCamera } from "../store/camera-state";
+import { edgeBounds, overlaps, viewBounds } from "./viewport";
 
 export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { children?: React.ReactNode }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -27,6 +29,9 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
   const selectedNode = useThreadrift(s => s.selectedNode);
   const selectedEdge = useThreadrift(s => s.selectedEdge);
   const mergeModeSource = useThreadrift(s => s.mergeModeSource);
+  const cameraMode = useThreadrift(s => s.cameraMode);
+  const [size, setSize] = useState({ width: 1000, height: 1000 });
+  const curveBounds = useMemo(() => edgeBounds(graph, sequences), [graph, sequences]);
   const touchAction = useThreadrift(s => {
     if (s.editorOpen) return "pinch-zoom";
     const rest = getRestingNodeIndex(s);
@@ -38,14 +43,22 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
     return "pinch-zoom";
   });
   const visibleNodeIdsStr = useThreadrift(s => {
-    const position = s.routeGeometry ? sampleRoute(s.routeGeometry, s.scrollCurrent) : { x: 0, y: 0 };
-    return Object.values(s.graph.nodes).filter(n => Math.hypot(n.x - position.x, n.y - position.y) <= 2500).map(n => n.id).join(",");
+    const bounds = viewBounds(resolveCamera(s), size.width, size.height);
+    return Object.values(s.graph.nodes).filter(n => (s.nodeDragActive && n.id === s.selectedNode) ||
+      (n.x >= bounds.left && n.x <= bounds.right && n.y >= bounds.top && n.y <= bounds.bottom)).map(n => n.id).join(",");
+  });
+  const visibleEdgesStr = useThreadrift(s => {
+    const bounds = viewBounds(resolveCamera(s), size.width, size.height);
+    return JSON.stringify(s.graph.edges.filter(edge => {
+      const curve = curveBounds.get(edge.id);
+      return !curve || overlaps(curve, bounds);
+    }).map(edge => edge.id));
   });
   const visibleNodeIds = new Set(visibleNodeIdsStr.split(",").filter(Boolean).map(Number));
   const nodes = Object.values(graph.nodes).filter(node => visibleNodeIds.has(node.id));
   const activeEdgeIds = new Set(activeEdges.map(edge => edge.id));
-  // Active curves can remain visible even when both endpoints are far offscreen.
-  const edges = graph.edges.filter(edge => visibleNodeIds.has(edge.from) || visibleNodeIds.has(edge.to) || activeEdgeIds.has(edge.id));
+  const visibleEdgeIds = new Set<string>(JSON.parse(visibleEdgesStr));
+  const edges = graph.edges.filter(edge => visibleEdgeIds.has(edge.id));
 
   useEffect(() => {
     const element = wrapperRef.current!;
@@ -63,8 +76,7 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
   useEffect(() => {
     const apply = (state: ThreadriftStore) => {
       const geometry = state.routeGeometry;
-      const routePosition = geometry ? sampleRoute(geometry, state.scrollCurrent) : { x: 0, y: 0 };
-      const position = routePosition;
+      const position = resolveCamera(state);
       const x = CANVAS_SIZE / 2 - position.x * CAMERA_SCALE;
       const y = CANVAS_SIZE / 2 - position.y * CAMERA_SCALE;
       if (cameraGroupRef.current) gsap.set(cameraGroupRef.current, { x, y, scale: CAMERA_SCALE, svgOrigin: "0 0" });
@@ -98,11 +110,12 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
       if (width !== previousWidth || height !== previousHeight) dragCleanup.current?.();
       previousWidth = width;
       previousHeight = height;
+      if (width !== undefined && height !== undefined) setSize(old => old.width === width && old.height === height ? old : { width, height });
       apply(store.getState());
     });
     if (wrapperRef.current) observer.observe(wrapperRef.current);
     return () => { unsubscribe(); observer.disconnect(); };
-  }, [store, graph, activeEdges, visibleNodeIdsStr, children]);
+  }, [store, graph, activeEdges, visibleNodeIdsStr, visibleEdgesStr, children]);
 
   // A selection is a recognized tap, never a pointer-down side effect.
   useEffect(() => {
@@ -136,7 +149,8 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
     const visibility = () => { if (document.hidden) clear(); };
     const unsubscribe = store.subscribe((state, previous) => {
       if (state.graphRevision !== previous.graphRevision || getRestingNodeIndex(state) === null) clear();
-      if (!state.editorOpen || (state.graphRevision !== previous.graphRevision && !ownDragUpdate.current)) dragCleanup.current?.();
+      if (!state.editorOpen || state.cameraMode !== previous.cameraMode ||
+        (state.graphRevision !== previous.graphRevision && !ownDragUpdate.current)) dragCleanup.current?.();
     });
     element.addEventListener("pointerdown", down, true);
     window.addEventListener("pointerdown", otherDown, true);
@@ -159,69 +173,93 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
     };
   }, [store]);
 
-  const editNode = (event: React.PointerEvent, id: number) => {
-    const state = store.getState();
-    if (!state.editorOpen || !event.isPrimary || event.button !== 0) return;
-    event.stopPropagation();
-    if (state.mergeModeSource !== null && id !== state.mergeModeSource) {
-      state.mergeNode(state.mergeModeSource, id);
-      state.setMergeMode(null);
-      return;
-    }
-    state.selectNode(id);
-    const node = state.graph.nodes[id];
+  const startDrag = (event: React.PointerEvent, movePoint: (delta: Point) => void, complete: (commit: boolean) => void) => {
     const matrix = cameraGroupRef.current?.getScreenCTM();
-    if (!node || !matrix || matrix.a * matrix.d - matrix.b * matrix.c === 0) return;
-    dragCleanup.current?.();
-    store.getState().setNodeDragActive(true);
-    // Freeze the drag-start frame so camera follow cannot amplify pointer deltas.
+    if (!matrix || matrix.a * matrix.d - matrix.b * matrix.c === 0) { complete(false); return; }
     const inverse = matrix.inverse();
     const start = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse);
     const target = event.currentTarget;
     const pointerId = event.pointerId;
+    const startX = event.clientX, startY = event.clientY;
+    let moved = false, finished = false;
     const move = (next: PointerEvent) => {
       if (next.pointerId !== pointerId) return;
+      if (!moved && Math.hypot(next.clientX - startX, next.clientY - startY) < 4) return;
+      moved = true;
       const point = new DOMPoint(next.clientX, next.clientY).matrixTransform(inverse);
       ownDragUpdate.current = true;
       try {
-        store.getState().updateNode(id, { x: node.x + point.x - start.x, y: node.y + point.y - start.y });
+        movePoint({ x: point.x - start.x, y: point.y - start.y });
       } finally { ownDragUpdate.current = false; }
     };
-    const cleanup = () => {
+    const cleanup = (commit = false) => {
+      if (finished) return;
+      finished = true;
+      dragCleanup.current = null;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("pointercancel", cancelPointer);
       window.removeEventListener("pointerdown", additionalPointer, true);
-      window.removeEventListener("blur", cleanup);
-      window.removeEventListener("resize", cleanup);
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("resize", cancel);
+      window.removeEventListener("keydown", key, true);
       document.removeEventListener("visibilitychange", hidden);
-      target.removeEventListener("lostpointercapture", cleanup);
+      target.removeEventListener("lostpointercapture", cancel);
       if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
-      dragCleanup.current = null;
-      store.getState().setNodeDragActive(false);
+      complete(commit && moved);
     };
-    const finish = (next: PointerEvent) => { if (next.pointerId === pointerId) cleanup(); };
-    const additionalPointer = (next: PointerEvent) => { if (next.pointerId !== pointerId) cleanup(); };
-    const hidden = () => { if (document.hidden) cleanup(); };
-    dragCleanup.current = cleanup;
-    target.setPointerCapture(pointerId);
-    target.addEventListener("lostpointercapture", cleanup);
+    const cancel = () => cleanup(false);
+    const cancelPointer = (next: PointerEvent) => { if (next.pointerId === pointerId) cancel(); };
+    const finish = (next: PointerEvent) => { if (next.pointerId === pointerId) { move(next); cleanup(true); } };
+    const additionalPointer = (next: PointerEvent) => { if (next.pointerId !== pointerId) cancel(); };
+    const hidden = () => { if (document.hidden) cancel(); };
+    const key = (next: KeyboardEvent) => { if (next.key === "Escape") { next.preventDefault(); next.stopPropagation(); cancel(); } };
+    dragCleanup.current = cancel;
+    try { target.setPointerCapture(pointerId); } catch { cancel(); return; }
+    target.addEventListener("lostpointercapture", cancel);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
+    window.addEventListener("pointercancel", cancelPointer);
     window.addEventListener("pointerdown", additionalPointer, true);
-    window.addEventListener("blur", cleanup);
-    window.addEventListener("resize", cleanup);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("resize", cancel);
+    window.addEventListener("keydown", key, true);
     document.addEventListener("visibilitychange", hidden);
+  };
+
+  const editNode = (event: React.PointerEvent, id: number) => {
+    const state = store.getState();
+    if (!state.editorOpen || state.cameraMode === "position" || !event.isPrimary || event.button !== 0 || event.ctrlKey || event.metaKey) return;
+    event.stopPropagation();
+    dragCleanup.current?.();
+    if (state.mergeModeSource !== null && id !== state.mergeModeSource) {
+      state.mergeNode(state.mergeModeSource, id); state.setMergeMode(null); return;
+    }
+    state.selectNode(id);
+    const node = store.getState().graph.nodes[id];
+    const token = store.getState().beginNodeEdit(id);
+    if (!node || token === null) return;
+    startDrag(event, delta => store.getState().previewNodePosition(token, { x: node.x + delta.x, y: node.y + delta.y }),
+      commit => store.getState().finishNodeEdit(token, commit));
+  };
+
+  const positionCamera = (event: React.PointerEvent) => {
+    const state = store.getState();
+    if (!state.editorOpen || state.cameraMode !== "position" || !event.isPrimary || event.button !== 0 || event.ctrlKey || event.metaKey) return;
+    event.stopPropagation();
+    dragCleanup.current?.();
+    const start = { ...resolveCamera(store.getState()) };
+    startDrag(event, delta => store.getState().moveCameraPreview({ x: start.x - delta.x, y: start.y - delta.y }),
+      commit => { if (!commit) store.getState().moveCameraPreview(start); });
   };
 
   return (
     <div ref={wrapperRef} tabIndex={0} role="region" aria-label="Threadrift map. Scroll or swipe to travel; use route controls to choose a path."
       className="absolute inset-0 w-full h-full overflow-hidden outline-offset-[-3px]" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-      <svg ref={svgRef} data-threadrift-surface="" className="absolute inset-0 w-full h-full"
-        style={{ position: "absolute", width: "100%", height: "100%", touchAction: "pinch-zoom" }}
+      <svg ref={svgRef} data-threadrift-surface="" className="absolute inset-0 w-full h-full" onPointerDownCapture={positionCamera}
+        style={{ position: "absolute", width: "100%", height: "100%", touchAction: "pinch-zoom", cursor: cameraMode === "position" ? "grab" : undefined }}
         viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`} preserveAspectRatio="xMidYMid slice">
-        <g ref={cameraGroupRef} className="will-change-transform">
+        <g ref={cameraGroupRef} data-threadrift-camera="" className="will-change-transform">
           {edges.map(edge => <GraphEdgeComponent key={edge.id} edge={edge} sequences={sequences} getNode={id => getNode(graph, id)}
             isActive={activeEdgeIds.has(edge.id)} isSelected={editorOpen && selectedEdge === edge.id}
             onPointerDown={(event, id) => { if (store.getState().editorOpen) { event.stopPropagation(); store.getState().selectEdge(id); } }} />)}
@@ -229,6 +267,13 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
             isActive={activePath.includes(node)} isVisited={visitedNodes.has(node.id)} isSelected={editorOpen && selectedNode === node.id}
             isMergeTarget={editorOpen && mergeModeSource !== null && node.id !== mergeModeSource} onPointerDown={editNode} />)}
           <GraphLabels nodes={activePath} />
+          {editorOpen && selectedNode !== null && graph.nodes[selectedNode]?.camera && (() => {
+            const node = graph.nodes[selectedNode], view = node.camera!;
+            return <g data-threadrift-view-guide="" pointerEvents="none" opacity={.65} stroke="oklch(.8 .11 230)" strokeWidth={1}>
+              <path d={`M ${node.x} ${node.y} L ${view.x} ${view.y}`} strokeDasharray="4 5" />
+              <path d={`M ${view.x - 10} ${view.y} h 20 M ${view.x} ${view.y - 10} v 20`} />
+            </g>;
+          })()}
         </g>
       </svg>
       <div ref={contentRef} data-threadrift-content="" style={{ position: "absolute", left: 0, top: 0, width: 0,

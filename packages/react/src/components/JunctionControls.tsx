@@ -24,7 +24,7 @@ export function JunctionControls() {
   const revision = useThreadrift(s => s.graphRevision);
   const restIndex = useThreadrift(getRestingNodeIndex);
   const index = useThreadrift(s => Math.max(0, Math.min(s.activePath.length - 1, Math.floor(s.scrollCurrent))));
-  const stationary = useThreadrift(s => !s.editorOpen && !s.inputSession && !s.isScrolling && s.scrollCurrent === s.scrollTarget);
+  const stationary = useThreadrift(s => !s.editorOpen && !s.cameraOverride && !s.cameraReturn && !s.inputSession && !s.isScrolling && s.scrollCurrent === s.scrollTarget);
   const previousAvailable = useThreadrift(s => s.scrollCurrent > 0);
   const nextAvailable = useThreadrift(s => s.scrollCurrent < s.activePath.length - 1);
   const current = path[index];
@@ -72,7 +72,7 @@ export function JunctionControls() {
     const state = store.getState();
     press.current = { revision: state.graphRevision, pointer: event.pointerId, x: event.clientX, y: event.clientY, target: event.currentTarget,
       eligible: requireNode ? getRestingNodeIndex(state) !== null :
-        !state.editorOpen && !state.inputSession && !state.isScrolling && state.scrollCurrent === state.scrollTarget };
+        !state.editorOpen && !state.cameraOverride && !state.cameraReturn && !state.inputSession && !state.isScrolling && state.scrollCurrent === state.scrollTarget };
   };
   const activate = (event: React.MouseEvent, action: () => void) => {
     const pending = press.current;

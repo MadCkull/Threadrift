@@ -1,4 +1,4 @@
-import type { GraphData, GraphNode, Point, Sequence } from "./types";
+import type { CameraTransition, GraphData, GraphNode, Point, Sequence } from "./types";
 import type { ActiveRoute } from "./topology";
 import { edgePath } from "./spline";
 import { getPathLength, getPointAtFraction } from "./path-math";
@@ -12,6 +12,7 @@ export interface RouteGeometryEdge {
   length: number;
   startDistance: number;
   endDistance: number;
+  camera?: CameraTransition;
 }
 
 export interface RouteGeometry {
@@ -35,7 +36,7 @@ export function createRouteGeometry(graph: GraphData, sequences: Sequence[], rou
     const startDistance = totalLength;
     totalLength += length;
     if (!Number.isFinite(totalLength)) throw new Error("Route length exceeds finite geometry bounds");
-    edges.push({ id: edge.id, from: edge.from, to: edge.to, d, length, startDistance, endDistance: totalLength });
+    edges.push({ id: edge.id, from: edge.from, to: edge.to, d, length, startDistance, endDistance: totalLength, ...(edge.camera ? { camera: { ...edge.camera } } : {}) });
     nodeDistances.push(totalLength);
   });
   return { nodes: route.nodes, edges, nodeDistances, totalLength };

@@ -12,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { getLevelColor } from "@threadrift/core";
+import { NodeCameraControls, NodePositionControls } from "./CameraControls";
 
 export function NodeTab() {
   const selectedNode = useThreadrift((s) => s.selectedNode);
@@ -107,53 +108,8 @@ export function NodeTab() {
         <span className="text-xs text-zinc-500 leading-relaxed">Preselected for visitors. Their own route choice always takes priority.</span>
       </label>}
 
-      {/* Position Controls */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2 text-zinc-500 text-xs uppercase tracking-wider">
-          <Move className="w-3.5 h-3.5" />
-          Position
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] text-zinc-600 font-mono">X</span>
-            <input
-              type="range"
-              min={20}
-              max={1500}
-              value={node.x}
-              onChange={(e) =>
-                updateNode(node.id, { x: Number(e.target.value) })
-              }
-              className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
-                [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
-                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
-            />
-            <span className="text-[10px] text-zinc-600 font-mono text-right">
-              {Math.round(node.x)}
-            </span>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] text-zinc-600 font-mono">Y</span>
-            <input
-              type="range"
-              min={20}
-              max={1500}
-              value={node.y}
-              onChange={(e) =>
-                updateNode(node.id, { y: Number(e.target.value) })
-              }
-              className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
-                [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
-                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
-            />
-            <span className="text-[10px] text-zinc-600 font-mono text-right">
-              {Math.round(node.y)}
-            </span>
-          </label>
-        </div>
-      </div>
+      <NodePositionControls id={node.id} />
+      <NodeCameraControls id={node.id} />
 
       {/* Divider */}
       <div className="h-px bg-white/5" />

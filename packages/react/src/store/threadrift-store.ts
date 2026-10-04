@@ -7,9 +7,15 @@ import { PersistenceCoordinator, type Draft } from "../persistence/coordinator";
 import type { PersistenceOptions } from "../persistence/types";
 import { getRestingNodeIndex, resolvePathSelection, selectForwardPath } from "./navigation";
 import { advanceMotion, routeState, targetPatch, type InputSession, type InputSource } from "./controller";
+import { CAMERA_RETURN_MS, cameraNavigationBlocked, resolveCamera } from "./camera-state";
 
 import {
   type GraphData,
+  type Point,
+  type CameraTransition,
+  isCameraView,
+  isCameraTransition,
+  nodeCamera,
   type GraphNode,
   type GraphEdge,
   type GraphJSON,
@@ -21,6 +27,7 @@ import {
   distanceToProgress,
   parseGraphDocument,
   serializeGraphDocument,
+  validateGraphData,
   DEFAULT_DOCUMENT_SETTINGS,
   PHYSICS_BOUNDS,
   type GraphDocument,
@@ -81,6 +88,21 @@ export interface ThreadriftStore {
   selectedEdge: string | null;
   editorOpen: boolean;
   nodeDragActive: boolean;
+  nodeEditId: number | null;
+  editorNotice: string | null;
+  cameraMode: "follow" | "freeze" | "position" | "preview";
+  cameraOverride: Point | null;
+  cameraReturn: { from: Point; elapsed: number } | null;
+  setCameraMode: (mode: "follow" | "freeze" | "position") => void;
+  moveCameraPreview: (point: Point) => void;
+  previewNodeCamera: (id: number) => void;
+  captureNodeCamera: (id: number) => void;
+  setNodeCamera: (id: number, camera: Point | undefined) => void;
+  setEdgeCamera: (id: string, camera: CameraTransition | undefined) => void;
+  beginNodeEdit: (id: number) => number | null;
+  previewNodePosition: (token: number, position: Point) => void;
+  finishNodeEdit: (token: number, commit: boolean) => void;
+  cancelNodeEdit: () => void;
   setNodeDragActive: (active: boolean) => void;
   mergeModeSource: number | null;
 
@@ -143,7 +165,7 @@ export interface ThreadriftStore {
 // ── Store Implementation ────────────────────────────────────
 
 /** Prepare an entire graph revision before publishing it to subscribers. */
-function prepareGraph(state: ThreadriftStore, candidate: GraphData, reset = false): Partial<ThreadriftStore> {
+function prepareGraph(state: ThreadriftStore, candidate: GraphData, reset = false, preview = false): Partial<ThreadriftStore> {
   // Local connection deletion/movement restores automatic routing. Newly supplied
   // invalid recommendations and invalid imports still fail validation below.
   if (!reset) candidate = { ...candidate, nodes: Object.fromEntries(Object.entries(candidate.nodes).map(([id, node]) => {
@@ -153,10 +175,16 @@ function prepareGraph(state: ThreadriftStore, candidate: GraphData, reset = fals
   })) };
   let nextNodeId = state.nextNodeId;
   for (const node of Object.values(candidate.nodes)) nextNodeId = Math.max(nextNodeId, node.id + 1);
-  const authored = serializeGraphDocument({ graph: candidate, nextNodeId, settings: DEFAULT_DOCUMENT_SETTINGS });
-  const graph: GraphData = { root: authored.root, nodes: authored.nodes, edges: authored.edges };
+  // A position preview starts from already-validated committed data and changes
+  // only x/y plus a validated camera point. Avoid serializing the document on
+  // every pointer sample. Clone nodes because topology writes computed fields.
+  const authored = preview ? validateGraphData(candidate) : serializeGraphDocument({ graph: candidate, nextNodeId, settings: DEFAULT_DOCUMENT_SETTINGS });
+  const graph: GraphData = { root: authored.root,
+    nodes: preview ? Object.fromEntries(Object.entries(authored.nodes).map(([id, node]) => [id, { ...node }])) : authored.nodes,
+    edges: authored.edges };
   const { sequences } = computeTopology(graph);
-  // Serialization already validates every edge and detaches extension data.
+  // Inactive edges also need valid derived geometry during a live preview.
+  if (preview) for (const edge of graph.edges) createRouteGeometry(graph, sequences, { nodes: [graph.nodes[edge.from], graph.nodes[edge.to]], edges: [edge] });
   const choices = reset ? {} : Object.fromEntries(Object.entries(state.branchChoices).filter(([id, edgeId]) =>
     graph.edges.some((edge) => edge.id === edgeId && edge.from === Number(id))));
   const route = getActiveRoute(graph, choices);
@@ -177,6 +205,8 @@ function prepareGraph(state: ThreadriftStore, candidate: GraphData, reset = fals
 export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) => {
   let recovery: Draft | null = null;
   let loadGeneration = 0;
+  let editGeneration = 0;
+  let edit: { token: number; nodeId: number; start: ThreadriftStore; moved: boolean } | null = null;
   const persistence = new PersistenceCoordinator({
     snapshot: () => get().toJSON(), loaded: () => get().isLoaded,
     autoSave: () => get().autoSaveEnabled, report: patch => set(patch),
@@ -215,6 +245,8 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   selectedEdge: null,
   editorOpen: false,
   nodeDragActive: false,
+  nodeEditId: null, editorNotice: null,
+  cameraMode: "follow", cameraOverride: null, cameraReturn: null,
   mergeModeSource: null,
   visitedNodes: new Set<number>(),
 
@@ -222,6 +254,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
 
   loadGraph: (input, options = {}) => {
     const data = parseGraphDocument(input);
+    get().cancelNodeEdit();
     const graph: GraphData = { nodes: data.nodes, edges: data.edges, root: data.root };
     const prepared = prepareGraph(get(), graph, true);
     // Validation and geometry complete before any document or persistence state changes.
@@ -230,6 +263,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
       autoSaveEnabled: data.settings.editor.autoSaveEnabled,
       extensions: data.extensions, settingsExtensions: data.settings.extensions,
       selectedNode: data.root, selectedEdge: null, mergeModeSource: null,
+      cameraMode: "follow", cameraOverride: null, cameraReturn: null, nodeDragActive: false, editorNotice: null,
       visitedNodes: new Set<number>(), isLoaded: true, hasRecoveryDraft: false,
     });
     persistence.accept(options.revision, options.source === "import" || options.source === "draft");
@@ -237,10 +271,12 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   importGraph: data => get().loadGraph(data, { source: "import" }),
 
   recompute: () => {
+    get().cancelNodeEdit();
     set(prepareGraph(get(), get().graph));
   },
 
   addNode: (parentId, mode) => {
+    get().cancelNodeEdit();
     const { graph, nextNodeId } = get();
     const parent = getNode(graph, parentId);
     if (!parent) return null;
@@ -296,6 +332,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   },
 
   removeNode: (id) => {
+    get().cancelNodeEdit();
     const { graph } = get();
     if (id === graph.root) return;
 
@@ -343,14 +380,20 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   },
 
   updateNode: (id, patch) => {
+    if (Object.keys(patch).length === 1 && Object.hasOwn(patch, "camera")) { get().setNodeCamera(id, patch.camera); return; }
+    get().cancelNodeEdit();
     const state = get();
     if (!state.graph.nodes[id]) return;
+    const moved = (patch.x !== undefined && patch.x !== state.graph.nodes[id].x) || (patch.y !== undefined && patch.y !== state.graph.nodes[id].y);
+    if (moved && state.cameraMode === "freeze" && state.cameraOverride) patch = { ...patch, camera: { ...state.cameraOverride } };
     try { set(prepareGraph(state, { ...state.graph, nodes: { ...state.graph.nodes, [id]: { ...state.graph.nodes[id], ...patch } } })); }
     catch (error) { set({ graphError: String(error) }); return; }
     persistence.changed();
   },
 
   updateEdge: (id, patch) => {
+    if (Object.keys(patch).length === 1 && Object.hasOwn(patch, "camera")) { get().setEdgeCamera(id, patch.camera); return; }
+    get().cancelNodeEdit();
     const state = get();
     if (!state.graph.edges.some((edge) => edge.id === id)) return;
     try { set(prepareGraph(state, { ...state.graph, edges: state.graph.edges.map((edge) => edge.id === id ? { ...edge, ...patch } : edge) })); }
@@ -359,6 +402,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   },
 
   removeEdge: (id) => {
+    get().cancelNodeEdit();
     const state = get();
     set({
       ...prepareGraph(state, { ...state.graph, edges: state.graph.edges.filter((edge) => edge.id !== id) }),
@@ -368,6 +412,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   },
 
   mergeNode: (fromId, toId) => {
+    get().cancelNodeEdit();
     const { graph } = get();
     if (graph.edges.some((e) => e.from === fromId && e.to === toId)) return;
 
@@ -398,6 +443,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     persistence.changed();
   },
   reloadGraph: async (options = {}) => {
+    if (get().nodeEditId !== null) { set({ saveError: "Finish or cancel the node edit before reloading." }); return false; }
     if (persistence.saving) { set({ saveError: "A save is in progress. Reload once it finishes." }); return false; }
     if (get().isDirty && !options.preserveDraft) { set({ saveError: "Save your changes before reloading from disk." }); return false; }
     if (get().isDirty && !persistence.backup()) {
@@ -412,7 +458,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     try {
       const loaded = await persistence.load();
       const document = parseGraphDocument(loaded.document);
-      if (request !== loadGeneration || version !== persistence.currentVersion) return false;
+      if (request !== loadGeneration || version !== persistence.currentVersion || get().nodeEditId !== null) return false;
       if (persistence.saving || writeEpoch !== persistence.currentWriteEpoch) {
         set({ saveError: "A save started during reload. Reload again to read its result." }); return false;
       }
@@ -459,6 +505,8 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     document.addEventListener("visibilitychange", hidden);
     return () => {
       loadGeneration++;
+      get().cancelNodeEdit();
+      set({ cameraMode: "follow", cameraOverride: null, cameraReturn: null });
       window.removeEventListener("beforeunload", beforeUnload);
       window.removeEventListener("pagehide", pagehide);
       document.removeEventListener("visibilitychange", hidden);
@@ -486,12 +534,12 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
 
   setScrollTarget: (val) => {
     const state = get();
-    if (!Number.isFinite(val) || !state.routeGeometry || state.nodeDragActive || state.inputSession) return;
+    if (!Number.isFinite(val) || !state.routeGeometry || (state.nodeDragActive || cameraNavigationBlocked(state)) || state.inputSession) return;
     set(targetPatch(state, progressToDistance(state.routeGeometry, val)));
   },
   setScrollCurrent: (val) => {
     const state = get();
-    if (!Number.isFinite(val) || !state.routeGeometry || state.nodeDragActive) return;
+    if (!Number.isFinite(val) || !state.routeGeometry || (state.nodeDragActive || cameraNavigationBlocked(state))) return;
     // Legacy animation API may only advance within already-authorized travel.
     if (val < Math.min(state.scrollCurrent, state.scrollTarget) || val > Math.max(state.scrollCurrent, state.scrollTarget)) return;
     const distanceCurrent = progressToDistance(state.routeGeometry, val);
@@ -503,14 +551,14 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   setNavigationElement: (navigationElement) => set({ navigationElement }),
   beginInput: (source) => {
     const state = get();
-    if (!state.isLoaded || state.nodeDragActive || state.inputSession || !state.routeGeometry) return null;
+    if (!state.isLoaded || (state.nodeDragActive || cameraNavigationBlocked(state)) || state.inputSession || !state.routeGeometry) return null;
     const id = state.inputGeneration + 1;
     set({ inputGeneration: id, inputSession: { id, source, blocked: false }, isScrolling: true });
     return id;
   },
   travelInput: (delta, sessionId) => {
     const state = get();
-    if (!Number.isFinite(delta) || delta === 0 || state.nodeDragActive ||
+    if (!Number.isFinite(delta) || delta === 0 || (state.nodeDragActive || cameraNavigationBlocked(state)) ||
       !state.inputSession || state.inputSession.id !== sessionId || state.inputSession.blocked || !state.routeGeometry) return;
     const boundedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 2000);
     const requested = state.distanceTarget + boundedDelta;
@@ -531,12 +579,20 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     }
   },
   advanceNavigation: (dt, reducedMotion) => {
+    const returning = get().cameraReturn;
+    if (returning) {
+      if (!Number.isFinite(dt) || dt <= 0) return;
+      const elapsed = returning.elapsed + Math.min(dt, 64);
+      set({ cameraReturn: reducedMotion || elapsed >= CAMERA_RETURN_MS ? null : { ...returning, elapsed } });
+      return;
+    }
+    if (get().cameraOverride) return;
     const patch = advanceMotion(get(), dt, reducedMotion);
     if (patch) set(patch);
   },
   stepNavigation: (direction) => {
     const state = get();
-    if (state.nodeDragActive || state.inputSession || state.isScrolling || state.scrollCurrent !== state.scrollTarget || !state.routeGeometry) return;
+    if ((state.nodeDragActive || cameraNavigationBlocked(state)) || state.inputSession || state.isScrolling || state.scrollCurrent !== state.scrollTarget || !state.routeGeometry) return;
     const next = direction > 0 ? Math.floor(state.scrollCurrent) + 1 : Math.ceil(state.scrollCurrent) - 1;
     set(targetPatch(state, progressToDistance(state.routeGeometry, next)));
   },
@@ -578,17 +634,122 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     if (selection) set({ ...selection, ...routeState(state, selection.branchChoices) });
   },
 
-  selectNode: (id) => set({ selectedNode: id, selectedEdge: null }),
-  selectEdge: (id) => set({ selectedEdge: id, selectedNode: null }),
+  selectNode: (id) => { if (id !== get().selectedNode) get().cancelNodeEdit(); set({ selectedNode: id, selectedEdge: null }); },
+  selectEdge: (id) => { get().cancelNodeEdit(); set({ selectedEdge: id, selectedNode: null }); },
   setNodeDragActive: active => {
     if (active) get().cancelInput();
     set({ nodeDragActive: active });
   },
   toggleEditor: () => {
+    get().cancelNodeEdit();
+    if (get().editorOpen) get().setCameraMode("follow");
     get().cancelInput();
     set((s) => ({ editorOpen: !s.editorOpen }));
   },
-  setMergeMode: (sourceId) => set({ mergeModeSource: sourceId }),
+  setMergeMode: (sourceId) => { get().cancelNodeEdit(); if (sourceId !== null) get().setCameraMode("follow"); set({ mergeModeSource: sourceId }); },
+
+  // Camera previews are runtime state; saved views are authored node metadata.
+  setCameraMode: mode => {
+    if (!get().editorOpen && mode !== "follow") return;
+    get().cancelNodeEdit();
+    if (mode === get().cameraMode) return;
+    const from = { ...resolveCamera(get()) };
+    if (mode !== "follow" && !isCameraView(from)) { set({ graphError: "This view is outside the supported camera range." }); return; }
+    get().cancelInput();
+    set({ cameraMode: mode, cameraOverride: mode === "follow" ? null : from,
+      cameraReturn: mode === "follow" ? { from, elapsed: 0 } : null, mergeModeSource: null, editorNotice: null });
+  },
+  moveCameraPreview: point => {
+    if (get().cameraMode !== "position" || !isCameraView(point)) return;
+    set({ cameraOverride: { ...point } });
+  },
+  previewNodeCamera: id => {
+    get().cancelNodeEdit();
+    const node = get().graph.nodes[id];
+    if (!get().editorOpen || !node || !isCameraView(nodeCamera(node))) return;
+    get().cancelInput();
+    set({ cameraMode: "preview", cameraOverride: { ...nodeCamera(node) }, cameraReturn: null, mergeModeSource: null });
+  },
+  captureNodeCamera: id => {
+    if (!get().editorOpen || !get().graph.nodes[id]) return;
+    const camera = { ...resolveCamera(get()) };
+    get().setCameraMode("freeze");
+    get().setNodeCamera(id, camera);
+  },
+  setNodeCamera: (id, camera) => {
+    if (camera !== undefined && !isCameraView(camera)) { set({ graphError: "Camera X/Y must be finite and within +/-1e9." }); return; }
+    get().cancelNodeEdit();
+    const state = get(), original = state.graph.nodes[id];
+    if (!original || (original.camera?.x === camera?.x && original.camera?.y === camera?.y)) return;
+    const node = { ...original, camera: camera ? { ...camera } : undefined };
+    const replace = (n: GraphNode) => n.id === id ? node : n;
+    const activePath = state.activePath.map(replace);
+    set({ graph: { ...state.graph, nodes: { ...state.graph.nodes, [id]: node } }, activePath,
+      sequences: state.sequences.map(sequence => ({ ...sequence, nodes: sequence.nodes.map(replace) })),
+      routeGeometry: state.routeGeometry ? { ...state.routeGeometry, nodes: activePath } : null,
+      graphRevision: state.graphRevision + 1, graphError: null });
+    persistence.changed();
+  },
+  setEdgeCamera: (id, camera) => {
+    if (camera !== undefined && !isCameraTransition(camera)) { set({ graphError: "Camera travel needs 0 <= start < end <= 100%, with at least 0.1% between them." }); return; }
+    get().cancelNodeEdit();
+    const state = get(), original = state.graph.edges.find(edge => edge.id === id);
+    if (!original || JSON.stringify(original.camera) === JSON.stringify(camera)) return;
+    const edge = { ...original, camera: camera ? { ...camera } : undefined };
+    set({ graph: { ...state.graph, edges: state.graph.edges.map(e => e.id === id ? edge : e) },
+      activeEdges: state.activeEdges.map(e => e.id === id ? edge : e),
+      routeGeometry: state.routeGeometry ? { ...state.routeGeometry, edges: state.routeGeometry.edges.map(e => e.id === id ? { ...e, camera: edge.camera } : e) } : null,
+      graphRevision: state.graphRevision + 1, graphError: null });
+    persistence.changed();
+  },
+  beginNodeEdit: id => {
+    get().cancelNodeEdit();
+    if (!get().editorOpen || !get().graph.nodes[id] || get().cameraMode === "position" || get().cameraReturn) return null;
+    get().cancelInput();
+    const token = ++editGeneration;
+    edit = { token, nodeId: id, start: get(), moved: false };
+    // Invalidate any read already in flight before the first preview update.
+    loadGeneration++;
+    set({ nodeEditId: token, nodeDragActive: true, editorNotice: null });
+    return token;
+  },
+  previewNodePosition: (token, point) => {
+    if (!edit || edit.token !== token) return;
+    const original = edit.start.graph.nodes[edit.nodeId];
+    const moved = point.x !== original.x || point.y !== original.y;
+    const camera = moved && edit.start.cameraMode === "freeze" ? edit.start.cameraOverride : original.camera;
+    try {
+      const candidate = { ...edit.start.graph, nodes: { ...edit.start.graph.nodes,
+        [original.id]: { ...original, x: point.x, y: point.y, camera: camera ? { ...camera } : undefined } } };
+      const prepared = prepareGraph(get(), candidate, false, true);
+      edit.moved = moved;
+      set(prepared);
+    } catch (error) { set({ graphError: String(error) }); }
+  },
+  finishNodeEdit: (token, commit) => {
+    if (!edit || edit.token !== token) return;
+    const completed = edit;
+    let prepared: Partial<ThreadriftStore> = {};
+    let failure: string | null = null;
+    if (commit && completed.moved) {
+      try { prepared = prepareGraph(get(), get().graph); }
+      catch (error) { commit = false; failure = String(error); }
+    }
+    edit = null;
+    if (commit && completed.moved) {
+      set({ ...prepared, nodeEditId: null, nodeDragActive: false, editorNotice: null });
+      persistence.changed();
+    } else {
+      const start = completed.start;
+      set({ graph: start.graph, sequences: start.sequences, activePath: start.activePath, activeEdges: start.activeEdges,
+        routeGeometry: start.routeGeometry, branchChoices: start.branchChoices, scrollCurrent: start.scrollCurrent,
+        scrollTarget: start.scrollTarget, distanceCurrent: start.distanceCurrent, distanceTarget: start.distanceTarget,
+        travelDirection: start.travelDirection, travelledEdges: start.travelledEdges, graphError: failure,
+        graphRevision: get().graphRevision + 1, nodeEditId: null, nodeDragActive: false,
+        editorNotice: !commit && completed.moved ? "Unfinished node move cancelled." : null });
+    }
+  },
+  cancelNodeEdit: () => { if (edit) get().finishNodeEdit(edit.token, false); },
 
   // ── Discovery ───────────────────────────────────────────
 
@@ -604,7 +765,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
 
   toJSON: () => {
     const { graph, nextNodeId, physics, autoSaveEnabled, extensions, settingsExtensions } = get();
-    return serializeGraphDocument({ graph, nextNodeId, extensions, settings: {
+    return serializeGraphDocument({ graph: edit?.start.graph ?? graph, nextNodeId, extensions, settings: {
       physics, editor: { autoSaveEnabled }, ...(settingsExtensions ? { extensions: settingsExtensions } : {}),
     } });
   },
