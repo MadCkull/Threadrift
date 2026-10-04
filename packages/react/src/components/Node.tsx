@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import { DEFAULT_ANCHOR } from "@threadrift/core";
 import { useThreadrift } from "../context/ThreadriftContext";
 
 export interface ThreadriftNodeProps {
@@ -27,18 +28,20 @@ export const Node = memo(function ThreadriftNode({
     return null;
   }
 
-  const anchorX = node.anchorX ?? 0;
-  const anchorY = node.anchorY ?? 0;
-  const anchorScale = node.anchorScale ?? 1;
+  const anchorX = node.anchorX ?? DEFAULT_ANCHOR.x;
+  const anchorY = node.anchorY ?? DEFAULT_ANCHOR.y;
+  const anchorWidth = node.anchorWidth ?? DEFAULT_ANCHOR.width;
 
   return (
     <div
-      className={`absolute pointer-events-auto ${className}`}
+      data-threadrift-anchor={numericId}
+      className={className}
       style={{
-        left: node.x,
-        top: node.y,
-        // Center the wrapper exactly on the node coordinate, plus anchor offsets
-        transform: `translate(calc(-50% + ${anchorX}px), calc(-50% + ${anchorY}px)) scale(${anchorScale})`,
+        position: "absolute",
+        pointerEvents: "auto",
+        left: `calc(${node.x}px * var(--threadrift-world-scale, 1) + ${anchorX}px)`,
+        top: `calc(${node.y}px * var(--threadrift-world-scale, 1) + ${anchorY}px)`,
+        width: anchorWidth,
         ...style,
       }}
     >

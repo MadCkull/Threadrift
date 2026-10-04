@@ -1,61 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useThreadrift } from "../context/ThreadriftContext";
+import { useContext, useEffect, useState } from "react";
+import { useThreadrift, ThreadriftContext } from "../context/ThreadriftContext";
 import { ThreadriftCanvas } from "./ThreadriftCanvas";
 import { ThreadriftNavigation } from "./ThreadriftNavigation";
-import type { GraphJSON } from "@threadrift/core";
+
 
 export function Threadrift({ children }: { children?: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  const loadGraph = useThreadrift((s) => s.loadGraph);
+  const reloadGraph = useThreadrift((s) => s.reloadGraph);
+  const store = useContext(ThreadriftContext);
 
   useEffect(() => {
-    async function fetchGraph() {
-      try {
-        let data: GraphJSON | null = null;
-        
-        // Try fetching from real-time API route first
-        try {
-          const apiRes = await fetch("/api/graph", { cache: "no-store" });
-          if (apiRes.ok) {
-            data = await apiRes.json();
-          }
-        } catch {
-          // Fallback to static public json
-        }
-
-        if (!data) {
-          const res = await fetch("/data/graph.json", { cache: "no-store" });
-          if (!res.ok) throw new Error("Failed to load Threadrift graph data");
-          data = await res.json();
-        }
-
-        if (data) {
-          loadGraph(data);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Error loading Threadrift graph:", err);
-        // Last resort: check localStorage backup
-        try {
-          const backup = localStorage.getItem("threadrift-graph-backup");
-          if (backup) {
-            loadGraph(JSON.parse(backup));
-            setLoading(false);
-            return;
-          }
-        } catch { /* ignore */ }
-
-        setError("Could not load Threadrift graph data.");
-        setLoading(false);
-      }
-    }
-
-    fetchGraph();
-  }, [loadGraph]);
+    if (store?.getState().isLoaded) { setLoading(false); return; }
+    let active = true;
+    void reloadGraph().then(ok => {
+      if (!active) return;
+      if (!ok && !store?.getState().isLoaded) setError(store?.getState().saveError ?? "Could not load graph data.");
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, [reloadGraph, store]);
 
   if (error) {
     return (

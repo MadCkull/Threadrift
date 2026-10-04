@@ -41,5 +41,8 @@ Thumbs.db
 /graphify-out
 PROJECT_CONTEXT.md
 /project-notes
-/packages/react/tests
 AGENTS.md
+apps/playground/
+DESIGN.md
+PERSISTENCE.md
+PRODUCT.md

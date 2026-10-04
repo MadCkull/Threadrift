@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useId } from "react";
 import type { GraphEdge, Sequence, GraphNode } from "@threadrift/core";
 import { edgePath } from "@threadrift/core";
 import { EDGE_HIT_WIDTH, getLevelColor } from "@threadrift/core";
@@ -20,6 +20,7 @@ export const GraphEdgeComponent = memo(function GraphEdgeComponent({
   isSelected,
   onPointerDown,
 }: GraphEdgeProps) {
+  const gradientId = useId();
   const d = edgePath(edge, sequences, getNode);
   if (!d) return null;
 
@@ -32,7 +33,7 @@ export const GraphEdgeComponent = memo(function GraphEdgeComponent({
     <g className="node-edge-group">
       <defs>
         <linearGradient
-          id={`grad-${edge.id}`}
+          id={gradientId}
           x1={fromNode?.x ?? 0}
           y1={fromNode?.y ?? 0}
           x2={toNode?.x ?? 0}
@@ -55,13 +56,13 @@ export const GraphEdgeComponent = memo(function GraphEdgeComponent({
 
       {/* Active Fill (Masked by JS progress later, but colored here) */}
       <path
-        id={`edge-${edge.id}`}
+        data-threadrift-edge-fill={edge.id}
         d={d}
         className={`fill-none transition-colors duration-500 ${
           isActive ? "" : "stroke-transparent"
         }`}
         style={{
-          stroke: isActive ? `url(#grad-${edge.id})` : undefined,
+          stroke: isActive ? `url(#${gradientId})` : undefined,
         }}
         strokeWidth={2.5}
         strokeLinecap="round"
@@ -83,6 +84,7 @@ export const GraphEdgeComponent = memo(function GraphEdgeComponent({
       {/* Invisible hit area for clicks */}
       <path
         d={d}
+        data-threadrift-edge={edge.id}
         className="fill-none stroke-transparent pointer-events-auto cursor-pointer"
         strokeWidth={EDGE_HIT_WIDTH}
         onPointerDown={(e) => onPointerDown?.(e, edge.id)}

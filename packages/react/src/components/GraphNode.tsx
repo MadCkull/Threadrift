@@ -79,6 +79,7 @@ export const GraphNodeComponent = memo(function GraphNodeComponent({
       {/* Invisible hit area for hover/click */}
       <circle
         r={NODE_HIT_RADIUS}
+        data-threadrift-node={node.id}
         className={`fill-transparent pointer-events-auto ${isMergeTarget ? "cursor-crosshair" : "cursor-pointer"}`}
         onPointerDown={(e) => onPointerDown?.(e, node.id)}
       />

@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "tsup --config tests/tsup.config.ts && node --test .turbo/tests/navigation-geometry.test.js"
   },
   "devDependencies": {
     "tsup": "^8.2.4",

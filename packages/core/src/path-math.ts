@@ -12,18 +12,20 @@ import type { Point } from "./types";
 type SvgPathPropertiesInstance = InstanceType<typeof svgPathProperties>;
 
 /** In-memory cache of parsed path properties */
-const pathCache = new Map<string, SvgPathPropertiesInstance>();
+const pathCache = new Map<string, { d: string; props: SvgPathPropertiesInstance }>();
 
 /**
  * Get or create a cached `svgPathProperties` instance for an edge.
  */
 function getCachedProperties(edgeId: string, d: string): SvgPathPropertiesInstance {
-  let props = pathCache.get(edgeId);
-  if (!props) {
-    props = new svgPathProperties(d);
-    pathCache.set(edgeId, props);
+  let entry = pathCache.get(edgeId);
+  if (!entry || entry.d !== d) {
+    entry = { d, props: new svgPathProperties(d) };
+    // Bound cross-provider/long-running editor cache growth.
+    if (pathCache.size >= 2048) pathCache.delete(pathCache.keys().next().value!);
+    pathCache.set(edgeId, entry);
   }
-  return props;
+  return entry.props;
 }
 
 /**

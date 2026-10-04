@@ -1,0 +1,451 @@
+{
+  "version": "1.0",
+  "nextNodeId": 25,
+  "root": 0,
+  "nodes": {
+    "0": {
+      "id": 0,
+      "name": "00 // Basecamp",
+      "content": "Start here. Scroll to leave basecamp.",
+      "x": 700,
+      "y": 80,
+      "anchorX": -340,
+      "anchorY": -30,
+      "anchorScale": 0.85
+    },
+    "1": {
+      "id": 1,
+      "name": "01 // The Crossroads",
+      "content": "Left: Archive. Right: Signal. Down: main.",
+      "x": 700,
+      "y": 340,
+      "anchorX": 60,
+      "anchorY": -190,
+      "anchorScale": 0.75
+    },
+    "2": {
+      "id": 2,
+      "name": "02 // The Causeway",
+      "content": "Ride the S-curve; compare camera and path.",
+      "x": 650,
+      "y": 680
+    },
+    "3": {
+      "id": 3,
+      "name": "03 // Confluence",
+      "content": "Three routes meet. Left leads to the grove.",
+      "x": 700,
+      "y": 1020
+    },
+    "4": {
+      "id": 4,
+      "name": "04 // High Pass",
+      "content": "Stay on course or explore the right fork.",
+      "x": 620,
+      "y": 1360
+    },
+    "5": {
+      "id": 5,
+      "name": "05 // The Home Stretch",
+      "content": "The grove rejoins here. Check your heading.",
+      "x": 680,
+      "y": 1700
+    },
+    "6": {
+      "id": 6,
+      "name": "06 // Horizon",
+      "content": "Main route complete. Scroll back to explore.",
+      "x": 650,
+      "y": 2100
+    },
+    "7": {
+      "id": 7,
+      "name": "A1 // Archive Gate",
+      "content": "A left branch with a soft opening sweep.",
+      "x": 370,
+      "y": 430
+    },
+    "8": {
+      "id": 8,
+      "name": "A2 // The Stacks",
+      "content": "Go down to rejoin; left finds a hidden trail.",
+      "x": 240,
+      "y": 660
+    },
+    "9": {
+      "id": 9,
+      "name": "A3 // Reading Room",
+      "content": "A single exit returns to Confluence.",
+      "x": 340,
+      "y": 880
+    },
+    "10": {
+      "id": 10,
+      "name": "A2.a // Hidden Index",
+      "content": "Nested branch: test the third depth level.",
+      "x": -80,
+      "y": 760
+    },
+    "11": {
+      "id": 11,
+      "name": "A2.b // Quiet Room",
+      "content": "Dead end. Reverse your scroll to return.",
+      "x": -150,
+      "y": 1030
+    },
+    "12": {
+      "id": 12,
+      "name": "B1 // Signal Gate",
+      "content": "A right branch mirrors the Archive.",
+      "x": 1040,
+      "y": 430
+    },
+    "13": {
+      "id": 13,
+      "name": "B2 // Relay Station",
+      "content": "Right: observatory. Down: the return route.",
+      "x": 1180,
+      "y": 680
+    },
+    "14": {
+      "id": 14,
+      "name": "B3 // Signal Return",
+      "content": "The nested route rejoins before the main.",
+      "x": 1070,
+      "y": 930
+    },
+    "15": {
+      "id": 15,
+      "name": "B2.a // Observatory",
+      "content": "Nested right turn with a wide curved exit.",
+      "x": 1490,
+      "y": 780
+    },
+    "16": {
+      "id": 16,
+      "name": "B2.b // Echo Chamber",
+      "content": "Rejoin Signal Return; test an uphill merge.",
+      "x": 1530,
+      "y": 1060
+    },
+    "17": {
+      "id": 17,
+      "name": "C1 // Moss Gate",
+      "content": "A scenic detour around High Pass.",
+      "x": 330,
+      "y": 1160
+    },
+    "18": {
+      "id": 18,
+      "name": "C2 // The Switchback",
+      "content": "Opposite curve handles form a gentle S.",
+      "x": 180,
+      "y": 1440
+    },
+    "19": {
+      "id": 19,
+      "name": "C3 // Grove Exit",
+      "content": "Rejoin the main route at The Home Stretch.",
+      "x": 310,
+      "y": 1670
+    },
+    "20": {
+      "id": 20,
+      "name": "D1 // The Decision",
+      "content": "No default exit. Choose left or right.",
+      "x": 1070,
+      "y": 1490
+    },
+    "21": {
+      "id": 21,
+      "name": "D2 // Lantern Walk",
+      "content": "Left choice: a nested route to Horizon.",
+      "x": 990,
+      "y": 1770
+    },
+    "22": {
+      "id": 22,
+      "name": "D3 // Wild Ridge",
+      "content": "Right choice: take the trail to its limit.",
+      "x": 1390,
+      "y": 1770
+    },
+    "23": {
+      "id": 23,
+      "name": "D2.a // Last Light",
+      "content": "One final merge joins the destination.",
+      "x": 1050,
+      "y": 2000
+    },
+    "24": {
+      "id": 24,
+      "name": "D3.a // Far Lookout",
+      "content": "Second dead end. Test reverse navigation.",
+      "x": 1510,
+      "y": 2050
+    }
+  },
+  "edges": [
+    {
+      "id": "e-0-1",
+      "from": 0,
+      "to": 1,
+      "type": "main",
+      "curve": 0,
+      "curveEnd": 0,
+      "diverge": 0
+    },
+    {
+      "id": "e-1-2",
+      "from": 1,
+      "to": 2,
+      "type": "main",
+      "curve": 0.22,
+      "curveEnd": -0.22,
+      "diverge": 0
+    },
+    {
+      "id": "e-2-3",
+      "from": 2,
+      "to": 3,
+      "type": "main",
+      "curve": -0.28,
+      "curveEnd": 0.18,
+      "diverge": 0
+    },
+    {
+      "id": "e-3-4",
+      "from": 3,
+      "to": 4,
+      "type": "main",
+      "curve": 0.3,
+      "curveEnd": -0.2,
+      "diverge": 0
+    },
+    {
+      "id": "e-4-5",
+      "from": 4,
+      "to": 5,
+      "type": "main",
+      "curve": -0.22,
+      "curveEnd": 0.24,
+      "diverge": 0
+    },
+    {
+      "id": "e-5-6",
+      "from": 5,
+      "to": 6,
+      "type": "main",
+      "curve": 0.14,
+      "curveEnd": -0.12,
+      "diverge": 0
+    },
+    {
+      "id": "e-7-8",
+      "from": 7,
+      "to": 8,
+      "type": "main",
+      "curve": 0.12,
+      "curveEnd": 0.2,
+      "diverge": 0
+    },
+    {
+      "id": "e-8-9",
+      "from": 8,
+      "to": 9,
+      "type": "main",
+      "curve": -0.25,
+      "curveEnd": 0.2,
+      "diverge": 0
+    },
+    {
+      "id": "e-10-11",
+      "from": 10,
+      "to": 11,
+      "type": "main",
+      "curve": 0.25,
+      "curveEnd": -0.2,
+      "diverge": 0
+    },
+    {
+      "id": "e-12-13",
+      "from": 12,
+      "to": 13,
+      "type": "main",
+      "curve": -0.12,
+      "curveEnd": -0.18,
+      "diverge": 0
+    },
+    {
+      "id": "e-13-14",
+      "from": 13,
+      "to": 14,
+      "type": "main",
+      "curve": 0.22,
+      "curveEnd": -0.15,
+      "diverge": 0
+    },
+    {
+      "id": "e-15-16",
+      "from": 15,
+      "to": 16,
+      "type": "main",
+      "curve": -0.3,
+      "curveEnd": 0.18,
+      "diverge": 0
+    },
+    {
+      "id": "e-17-18",
+      "from": 17,
+      "to": 18,
+      "type": "main",
+      "curve": 0.28,
+      "curveEnd": -0.2,
+      "diverge": 0
+    },
+    {
+      "id": "e-18-19",
+      "from": 18,
+      "to": 19,
+      "type": "main",
+      "curve": -0.35,
+      "curveEnd": 0.3,
+      "diverge": 0
+    },
+    {
+      "id": "e-21-23",
+      "from": 21,
+      "to": 23,
+      "type": "main",
+      "curve": 0.2,
+      "curveEnd": -0.25,
+      "diverge": 0
+    },
+    {
+      "id": "e-22-24",
+      "from": 22,
+      "to": 24,
+      "type": "main",
+      "curve": -0.25,
+      "curveEnd": 0.2,
+      "diverge": 0
+    },
+    {
+      "id": "e-1-7",
+      "from": 1,
+      "to": 7,
+      "type": "branch",
+      "curve": 0.12,
+      "curveEnd": -0.15,
+      "diverge": 0.28
+    },
+    {
+      "id": "e-9-3",
+      "from": 9,
+      "to": 3,
+      "type": "branch",
+      "curve": -0.1,
+      "curveEnd": 0.18,
+      "diverge": -0.22
+    },
+    {
+      "id": "e-8-10",
+      "from": 8,
+      "to": 10,
+      "type": "branch",
+      "curve": 0.12,
+      "curveEnd": 0.15,
+      "diverge": 0.3
+    },
+    {
+      "id": "e-1-12",
+      "from": 1,
+      "to": 12,
+      "type": "branch",
+      "curve": -0.12,
+      "curveEnd": 0.15,
+      "diverge": -0.28
+    },
+    {
+      "id": "e-14-3",
+      "from": 14,
+      "to": 3,
+      "type": "branch",
+      "curve": 0.1,
+      "curveEnd": -0.18,
+      "diverge": 0.22
+    },
+    {
+      "id": "e-13-15",
+      "from": 13,
+      "to": 15,
+      "type": "branch",
+      "curve": -0.12,
+      "curveEnd": -0.15,
+      "diverge": -0.28
+    },
+    {
+      "id": "e-16-14",
+      "from": 16,
+      "to": 14,
+      "type": "branch",
+      "curve": 0.28,
+      "curveEnd": -0.22,
+      "diverge": 0.4
+    },
+    {
+      "id": "e-3-17",
+      "from": 3,
+      "to": 17,
+      "type": "branch",
+      "curve": 0.15,
+      "curveEnd": -0.18,
+      "diverge": 0.25
+    },
+    {
+      "id": "e-19-5",
+      "from": 19,
+      "to": 5,
+      "type": "branch",
+      "curve": -0.12,
+      "curveEnd": 0.18,
+      "diverge": -0.26
+    },
+    {
+      "id": "e-4-20",
+      "from": 4,
+      "to": 20,
+      "type": "branch",
+      "curve": -0.15,
+      "curveEnd": 0.12,
+      "diverge": -0.3
+    },
+    {
+      "id": "e-20-21",
+      "from": 20,
+      "to": 21,
+      "type": "branch",
+      "curve": 0.12,
+      "curveEnd": -0.12,
+      "diverge": 0.18
+    },
+    {
+      "id": "e-20-22",
+      "from": 20,
+      "to": 22,
+      "type": "branch",
+      "curve": -0.12,
+      "curveEnd": 0.12,
+      "diverge": -0.24
+    },
+    {
+      "id": "e-23-6",
+      "from": 23,
+      "to": 6,
+      "type": "branch",
+      "curve": 0.12,
+      "curveEnd": -0.15,
+      "diverge": 0.26
+    }
+  ]
+}

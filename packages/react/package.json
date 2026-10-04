@@ -8,7 +8,7 @@
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "eslint src/",
-    "test": "tsup --config tests/tsup.config.ts && node --test .turbo/tests/navigation.test.js"
+    "test": "tsup --config tests/tsup.config.ts && node --test .turbo/tests/navigation.test.js .turbo/tests/persistence.test.js"
   },
   "dependencies": {
     "@threadrift/core": "workspace:*",

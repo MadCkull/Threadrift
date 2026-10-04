@@ -1,217 +1,279 @@
 "use client";
 
-import { useEffect, useRef, useContext } from "react";
-import Lenis from "lenis";
+import { useEffect, useContext } from "react";
+import { CAMERA_SCALE } from "@threadrift/core";
 import { useThreadrift, ThreadriftContext } from "../context/ThreadriftContext";
-import { getRestingNodeIndex } from "../store/navigation";
-import { 
-  SCROLL_IDLE_TIMEOUT,
-  SNAP_DEAD_ZONE,
-} from "@threadrift/core";
-import { 
-  detectBranchIntent, 
-  applyMagneticSnap 
-} from "@threadrift/core";
+import { DRAG_THRESHOLD_PX, WHEEL_QUIET_MS, WheelSessionTracker, WheelReversePause, isFreshReverseWheelIntent, isNavigationSurface, normalizeWheelDelta, shouldCancelPointerCapture } from "../input/native-input";
 
+/** Input adapters only emit travel commands; route choices belong to explicit controls. */
 export function ThreadriftNavigation() {
-  const lenisRef = useRef<Lenis | null>(null);
-  const snapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const storeApi = useContext(ThreadriftContext);
+  const store = useContext(ThreadriftContext);
+  const element = useThreadrift(state => state.navigationElement);
 
-  // Zustand bindings
-  const setScrollTarget = useThreadrift((s) => s.setScrollTarget);
-  const setScrollCurrent = useThreadrift((s) => s.setScrollCurrent);
-  const setIsScrolling = useThreadrift((s) => s.setIsScrolling);
-  const setBranchChoice = useThreadrift((s) => s.setBranchChoice);
-
-  // Initialize Lenis
   useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), // expoOut
-      orientation: "vertical",
-      gestureOrientation: "both", // allow x and y
-      wheelMultiplier: 1,
+    if (!store || !element) return;
+    const wheel = new WheelSessionTracker();
+    const reversePause = new WheelReversePause();
+    let reversePauseSession: number | null = null;
+    let previousWheelSample: { time: number; momentum?: boolean } | null = null;
+    let wheelSession: number | null = null;
+    let wheelDraining = false;
+    let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+    let pointer: { id: number; x: number; y: number; lastY: number; dragging: boolean; session: number | null } | null = null;
+    const pointers = new Set<number>();
+    let multiTouch = false;
+    let suppressClickUntil = 0;
+
+    const worldScale = () => {
+      const rect = element.getBoundingClientRect();
+      return Math.max(0.01, CAMERA_SCALE * Math.max(rect.width, rect.height) / 1000);
+    };
+    const selectedText = () => !!window.getSelection()?.toString();
+    const isOwned = (event: Event) => !event.defaultPrevented && !store.getState().nodeDragActive &&
+      isNavigationSurface(event.target, element) && !selectedText();
+    const cancel = () => {
+      if (wheelTimer) clearTimeout(wheelTimer);
+      wheelTimer = undefined;
+      wheelSession = null;
+      wheelDraining = false;
+      reversePauseSession = null;
+      reversePause.reset();
+      previousWheelSample = null;
+      // A cancelled sequence cannot resume with an already arriving tail.
+      wheel.reset();
+      wheel.sample(performance.now(), false);
+      if (pointer) suppressClickUntil = performance.now() + 800;
+      const captured = pointer;
+      pointer = null;
+      if (captured && element.hasPointerCapture(captured.id)) element.releasePointerCapture(captured.id);
+      pointers.clear();
+      multiTouch = false;
+      store.getState().cancelInput();
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      const now = performance.now();
+      const momentum = (event as WheelEvent & { momentum?: boolean }).momentum;
+      const previousMomentum = previousWheelSample?.momentum;
+      const gap = previousWheelSample ? now - previousWheelSample.time : Infinity;
+      previousWheelSample = { time: now, momentum };
+      const state = store.getState();
+      const rawLine = Number.parseFloat(getComputedStyle(element).lineHeight);
+      const delta = normalizeWheelDelta(event, Number.isFinite(rawLine) ? rawLine : 16, element.clientHeight || 800);
+      const zoom = event.ctrlKey || event.metaKey;
+      // A horizontal-only sample on the map has no navigation intent yet.
+      // Events owned by content or browser zoom must still latch their ownership.
+      if (delta.y === 0 && !zoom && event.cancelable && isOwned(event) && !pointer) return;
+      const atRest = state.scrollCurrent === state.scrollTarget && Number.isInteger(state.scrollCurrent);
+      const last = state.activePath[state.activePath.length - 1];
+      const outward = atRest && ((state.scrollCurrent === 0 && delta.y < 0) ||
+        (state.scrollCurrent === state.activePath.length - 1 && delta.y > 0 &&
+          last && !state.graph.edges.some(edge => edge.from === last.id)));
+      const eligible = !zoom && event.cancelable && delta.y !== 0 && isOwned(event) && !outward && !pointer;
+      const session = wheel.sample(now, eligible, momentum);
+      if (session.fresh) {
+        reversePauseSession = null;
+        reversePause.reset();
+      }
+      if (session.fresh) wheelDraining = momentum === true && !zoom && event.cancelable && isOwned(event);
+      if (session.fresh && wheelSession !== null) {
+        state.endInput(wheelSession);
+        wheelSession = null;
+      }
+      if (wheelTimer) clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {
+        if (wheelSession !== null) store.getState().endInput(wheelSession);
+        wheelSession = null;
+        wheelTimer = undefined;
+      }, WHEEL_QUIET_MS);
+      // Modifier zoom and events owned elsewhere are never cancelled. Stop graph motion too.
+      if (zoom || !event.cancelable || !isNavigationSurface(event.target, element) || state.nodeDragActive) {
+        if (zoom) store.getState().cancelInput();
+        else if (wheelSession !== null) store.getState().endInput(wheelSession);
+        wheelSession = null;
+        return;
+      }
+      // A browser-labelled momentum tail after a quiet gap may not start travel
+      // or leak through a graph decision into document scrolling.
+      if (wheelDraining && isOwned(event)) {
+        event.preventDefault();
+        return;
+      }
+      if (!session.owned || event.defaultPrevented) return;
+      if (session.fresh) wheelSession = store.getState().beginInput('wheel');
+      if (wheelSession === null) return;
+      event.preventDefault();
+      const freshReverseIntent = eligible && isFreshReverseWheelIntent(gap, momentum, previousMomentum);
+      if (reversePauseSession === wheelSession && (reversePause.ready(now) || freshReverseIntent)) {
+        store.getState().endInput(wheelSession);
+        wheelSession = store.getState().beginInput('wheel');
+        reversePauseSession = null;
+        reversePause.reset();
+        if (wheelSession === null) return;
+      }
+      store.getState().travelInput(delta.y * state.physics.scrollSensitivity * 1000 / worldScale(), wheelSession);
+      const after = store.getState();
+      const stoppedNode = after.activePath[after.scrollTarget];
+      if (delta.y < 0 && after.inputSession?.blocked && after.scrollTarget > 0 && stoppedNode &&
+        after.graph.edges.filter(edge => edge.from === stoppedNode.id).length > 1) {
+        reversePauseSession = wheelSession;
+        if (after.scrollCurrent === after.scrollTarget) reversePause.start(now);
+      }
+    };
+
+    const handleDown = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse') return;
+      // Studio owns node/edge gestures; empty canvas still supports swipes.
+      if (store.getState().editorOpen && event.target instanceof Element &&
+        event.target.closest('[data-threadrift-node], [data-threadrift-edge]')) return;
+      pointers.add(event.pointerId);
+      if (pointers.size > 1 || !event.isPrimary) {
+        multiTouch = true;
+        suppressClickUntil = performance.now() + 800;
+        const captured = pointer;
+        pointer = null;
+        if (captured && element.hasPointerCapture(captured.id)) element.releasePointerCapture(captured.id);
+        store.getState().cancelInput();
+        return;
+      }
+      if (multiTouch || event.button !== 0 || event.ctrlKey || event.metaKey || !isOwned(event)) return;
+      suppressClickUntil = 0;
+      pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, lastY: event.clientY, dragging: false, session: null };
+      // Ownership/capture begins only after a drag is recognized, leaving taps alone.
+    };
+    const handleMove = (event: PointerEvent) => {
+      if (!pointer || event.pointerId !== pointer.id || multiTouch) return;
+      if (!pointer.dragging) {
+        if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) < DRAG_THRESHOLD_PX) return;
+        const state = store.getState();
+        const rest = state.scrollCurrent === state.scrollTarget && Number.isInteger(state.scrollCurrent);
+        const node = state.activePath[Math.round(state.scrollCurrent)];
+        const outward = rest && ((state.scrollCurrent === 0 && event.clientY > pointer.y) ||
+          (event.clientY < pointer.y && node && !state.graph.edges.some(edge => edge.from === node.id)));
+        if (outward) {
+          // Directional touch-action, set before pointerdown, lets the browser own
+          // outward gestures at boundaries. Never reclaim their reversal or tail.
+          pointer = null;
+          suppressClickUntil = performance.now() + 800;
+          return;
+        }
+        pointer.dragging = true;
+        suppressClickUntil = Infinity;
+        const previousInput = store.getState().inputSession;
+        if (previousInput?.source === 'wheel' && previousInput.blocked) {
+          // A newly claimed touch gesture expresses fresh intent even on a hybrid
+          // device still delivering the previous wheel's blocked tail.
+          store.getState().endInput(previousInput.id);
+          if (wheelTimer) clearTimeout(wheelTimer);
+          wheelTimer = undefined;
+          wheelSession = null;
+          wheelDraining = false;
+          reversePauseSession = null;
+          reversePause.reset();
+          wheel.reset();
+          wheel.sample(performance.now(), false);
+        }
+        pointer.session = store.getState().beginInput('pointer');
+        element.setPointerCapture(event.pointerId);
+      }
+      const delta = pointer.lastY - event.clientY;
+      pointer.lastY = event.clientY;
+      if (pointer.session === null) return;
+      if (event.cancelable) event.preventDefault();
+      store.getState().travelInput(delta * store.getState().physics.touchSensitivity * 1000 / worldScale(), pointer.session);
+    };
+    const handleUp = (event: PointerEvent) => {
+      pointers.delete(event.pointerId);
+      if (pointer?.id === event.pointerId) {
+        const session = pointer.session;
+        const wasDrag = pointer.dragging;
+        const captured = pointer;
+        pointer = null;
+        if (element.hasPointerCapture(captured.id)) element.releasePointerCapture(captured.id);
+        if (session !== null) {
+          if (event.type === 'pointercancel') store.getState().cancelInput();
+          else store.getState().endInput(session);
+        }
+        if (wasDrag || event.type === 'pointercancel') suppressClickUntil = performance.now() + 800;
+      }
+      if (pointers.size === 0) multiTouch = false;
+    };
+    const handleLostCapture = (event: PointerEvent) => {
+      if (!shouldCancelPointerCapture(pointer?.id, event.pointerId, event.target === element, element.hasPointerCapture(event.pointerId))) return;
+      pointer = null;
+      suppressClickUntil = performance.now() + 800;
+      store.getState().cancelInput();
+    };
+    const observeAdditionalPointer = (event: PointerEvent) => {
+      // Capture continues outside the viewer; a second finger there still cancels it.
+      if (pointer && event.pointerId !== pointer.id && event.pointerType !== 'mouse' && !element.contains(event.target as Node)) {
+        handleDown(event);
+      }
+    };
+    const handleClick = (event: MouseEvent) => {
+      if (event.detail !== 0 && performance.now() < suppressClickUntil && isNavigationSurface(event.target, element)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || store.getState().nodeDragActive || selectedText()) return;
+      if (event.target !== element && !isNavigationSurface(event.target, element)) return;
+      const direction = ['ArrowDown', 'PageDown'].includes(event.key) ? 1 : ['ArrowUp', 'PageUp'].includes(event.key) ? -1 : 0;
+      if (!direction) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      store.getState().stepNavigation(direction as -1 | 1);
+    };
+    const visibility = () => { if (document.hidden) cancel(); };
+    const unsubscribe = store.subscribe((next, previous) => {
+      if (next.graphRevision !== previous.graphRevision || (next.editorOpen && !previous.editorOpen)) cancel();
+      else if (reversePauseSession !== null && next.inputSession?.id === reversePauseSession &&
+        next.inputSession.blocked && next.scrollCurrent === next.scrollTarget) reversePause.start(performance.now());
     });
-    lenisRef.current = lenis;
-
-    // Use requestAnimationFrame for Lenis loop
-    let rafId: number;
-    function raf(time: number) {
-      lenis.raf(time);
-      rafId = requestAnimationFrame(raf);
-    }
-    requestAnimationFrame(raf);
-
+    element.addEventListener('wheel', handleWheel, { passive: false });
+    element.addEventListener('pointerdown', handleDown, true);
+    element.addEventListener('pointermove', handleMove, { passive: false });
+    window.addEventListener('pointerdown', observeAdditionalPointer, true);
+    window.addEventListener('pointerup', handleUp, true);
+    window.addEventListener('pointercancel', handleUp, true);
+    element.addEventListener('lostpointercapture', handleLostCapture);
+    element.addEventListener('click', handleClick, true);
+    element.addEventListener('keydown', handleKey);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('resize', cancel);
+    document.addEventListener('visibilitychange', visibility);
     return () => {
-      lenis.destroy();
-      cancelAnimationFrame(rafId);
+      unsubscribe();
+      element.removeEventListener('wheel', handleWheel);
+      element.removeEventListener('pointerdown', handleDown, true);
+      element.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerdown', observeAdditionalPointer, true);
+      window.removeEventListener('pointerup', handleUp, true);
+      window.removeEventListener('pointercancel', handleUp, true);
+      element.removeEventListener('lostpointercapture', handleLostCapture);
+      element.removeEventListener('click', handleClick, true);
+      element.removeEventListener('keydown', handleKey);
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('resize', cancel);
+      document.removeEventListener('visibilitychange', visibility);
+      cancel();
     };
-  }, []);
+  }, [store, element]);
 
-  // Handle Wheel + Touch Events (Custom Physics)
   useEffect(() => {
-    function processGesture(dx: number, dy: number, sensitivity: number, preventDefault: () => void) {
-      if (!storeApi) return;
-      const state = storeApi.getState();
-      const { graph, activePath, branchChoices } = state;
-      if (!graph.nodes || activePath.length === 0) return;
-
-      preventDefault();
-
-      const currentScrollTarget = state.scrollTarget;
-
-      // Snap dead zone: if snapped to a node, ignore small movements
-      const isSnapped = Math.abs(currentScrollTarget - Math.round(currentScrollTarget)) < 0.01;
-      const gestureMag = Math.hypot(dx, dy);
-      if (isSnapped && gestureMag < SNAP_DEAD_ZONE) {
-        return; // Ignore tiny accidental movements when snapped
-      }
-
-      // Branch Detection & Path Locking
-      const restingIndex = getRestingNodeIndex(state);
-      if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current);
-
-      // Determine base movement
-      const currentNode = restingIndex === null ? undefined : activePath[restingIndex];
-
-      // Default to vertical scrolling driving forward/backward progress
-      let movement = dy * sensitivity;
-
-      if (currentNode) {
-        const { edgeId, type } = detectBranchIntent(
-          dx,
-          dy,
-          currentNode,
-          graph,
-          branchChoices[currentNode.id]
-        );
-
-        if (edgeId) {
-          if (type === "branch") {
-            setBranchChoice(currentNode.id, edgeId);
-          } else if (type === "main") {
-            setBranchChoice(currentNode.id, null);
-          }
-          
-          // If the user made a strong horizontal swipe to select a branch, 
-          // translate that into forward movement so they don't have to scroll down immediately after.
-          if (Math.abs(dx) > Math.abs(dy)) {
-            movement = Math.abs(dx) * sensitivity;
-          }
-        }
-      }
-
-      // If they swipe left/right while strictly at a node but it doesn't match a branch
-      // (or there's only 1 branch), we still want them to be able to move forward smoothly.
-      if (Math.abs(movement) < 0.001 && Math.abs(dx) > 0) {
-          movement = dx * sensitivity;
-      }
-
-      // Update scroll target
-      // A branch choice can change path length synchronously on this gesture.
-      const maxScroll = storeApi.getState().activePath.length - 1;
-      let newTarget = currentScrollTarget + movement;
-      newTarget = Math.max(0, Math.min(newTarget, maxScroll));
-      
-      setIsScrolling(true);
-      setScrollTarget(newTarget);
-
-      // Setup magnetic snap timeout
-      snapTimeoutRef.current = setTimeout(() => {
-        setIsScrolling(false);
-      }, SCROLL_IDLE_TIMEOUT);
-    }
-
-    // ── Wheel handler ──
-    function handleWheel(e: WheelEvent) {
-      const scrollSens = storeApi?.getState().physics.scrollSensitivity ?? 0.001;
-      processGesture(e.deltaX, e.deltaY, scrollSens, () => e.preventDefault());
-    }
-
-    // ── Touch handlers ──
-    let lastTouchX = 0;
-    let lastTouchY = 0;
-    
-    function handleTouchStart(e: TouchEvent) {
-      if (e.touches.length !== 1) return;
-      lastTouchX = e.touches[0].clientX;
-      lastTouchY = e.touches[0].clientY;
-    }
-    
-    function handleTouchMove(e: TouchEvent) {
-      if (e.touches.length !== 1) return;
-      
-      const currentX = e.touches[0].clientX;
-      const currentY = e.touches[0].clientY;
-      
-      const dx = lastTouchX - currentX;
-      const dy = lastTouchY - currentY;
-      
-      lastTouchX = currentX;
-      lastTouchY = currentY;
-      
-      const touchSens = storeApi?.getState().physics.touchSensitivity ?? 0.003;
-      processGesture(dx, dy, touchSens, () => e.cancelable && e.preventDefault());
-    }
-
-    function handleTouchEnd() {
-      // Immediately trigger snap when finger lifts
-      setIsScrolling(false);
-    }
-
-    // Attach listeners
-    window.addEventListener("wheel", handleWheel, { passive: false });
-    window.addEventListener("touchstart", handleTouchStart, { passive: false });
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("touchend", handleTouchEnd);
-    
-    return () => {
-      if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current);
-      window.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
+    if (!store) return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let previous: number | null = null;
+    let frame = 0;
+    const tick = (time: number) => {
+      if (!document.hidden) store.getState().advanceNavigation(previous === null ? 0 : Math.min(64, time - previous), media.matches);
+      previous = document.hidden ? null : time;
+      frame = requestAnimationFrame(tick);
     };
-  }, [setIsScrolling, setBranchChoice, setScrollTarget, storeApi]);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [store]);
 
-  // Handle Animation Loop (Snapping and Current Interpolation)
-  useEffect(() => {
-    let rafId: number;
-
-    function loop() {
-      if (!storeApi) return;
-      const state = storeApi.getState();
-      const { snapStrength, snapThreshold } = state.physics;
-      
-      // Magnetic snapping (runs always — even DURING scrolling for stickiness)
-      if (!state.isScrolling) {
-        const snappedTarget = applyMagneticSnap(state.scrollTarget, snapThreshold, snapStrength);
-        if (snappedTarget !== state.scrollTarget) {
-          setScrollTarget(snappedTarget);
-        }
-      }
-
-      // Smooth interpolation from current to target (faster lerp = 0.16)
-      const target = storeApi.getState().scrollTarget;
-      let current = storeApi.getState().scrollCurrent;
-      
-      const diff = target - current;
-      if (Math.abs(diff) < 0.001) {
-        // Hard snap to exact value to prevent micro-jitter
-        if (current !== target) setScrollCurrent(target);
-      } else {
-        current += diff * 0.16; // 60% faster than old 0.1
-        setScrollCurrent(current);
-      }
-
-      rafId = requestAnimationFrame(loop);
-    }
-    
-    loop();
-    
-    return () => cancelAnimationFrame(rafId);
-  }, [setScrollCurrent, setScrollTarget, storeApi]);
-
-  return null; // This is a logic-only component
+  return null;
 }

@@ -14,7 +14,17 @@ import {
 } from "lucide-react";
 
 export function GlobalTab() {
-  const loadGraph = useThreadrift((s) => s.loadGraph);
+  const reloadGraph = useThreadrift(s => s.reloadGraph);
+  const saveGraph = useThreadrift(s => s.saveGraph);
+  const isDirty = useThreadrift(s => s.isDirty);
+  const saveError = useThreadrift(s => s.saveError);
+  const draftError = useThreadrift(s => s.draftError);
+  const autosave = useThreadrift(s => s.autoSaveEnabled);
+  const setAutosave = useThreadrift(s => s.setAutoSaveEnabled);
+  const toJSON = useThreadrift(s => s.toJSON);
+  const hasRecoveryDraft = useThreadrift(s => s.hasRecoveryDraft);
+  const restoreDraft = useThreadrift(s => s.restoreDraft);
+  const discardDraft = useThreadrift(s => s.discardDraft);
   const physics = useThreadrift((s) => s.physics);
   const updatePhysics = useThreadrift((s) => s.updatePhysics);
   const saveStatus = useThreadrift((s) => s.saveStatus);
@@ -25,101 +35,49 @@ export function GlobalTab() {
 
   async function handleReload() {
     setIsReloading(true);
-    try {
-      const res = await fetch("/api/graph", { cache: "no-store" }).catch(() =>
-        fetch("/data/graph.json", { cache: "no-store" })
-      );
-      if (!res.ok) throw new Error("Failed to reload");
-      const data = await res.json();
-      loadGraph(data);
-      setReloadStatus("Reloaded from disk!");
-      setTimeout(() => setReloadStatus(null), 2500);
-    } catch (err) {
-      console.error("Reload failed:", err);
-      setReloadStatus("Reload failed");
-      setTimeout(() => setReloadStatus(null), 3000);
-    } finally {
-      setIsReloading(false);
-    }
+    const ok = await reloadGraph({ preserveDraft: isDirty });
+    setReloadStatus(ok ? "Loaded disk copy" : "Reload failed; current edits retained");
+    setIsReloading(false);
+  }
+  function exportDocument() {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(toJSON(), null, 2) + "\n"], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = "threadrift.json"; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Real-time Auto-Save Status */}
-      <div className="flex flex-col gap-2">
-        <span className="text-zinc-500 text-xs uppercase tracking-wider">
-          Persistence
-        </span>
-
-        <div className="bg-zinc-900/50 border border-white/5 rounded-xl p-3.5 flex flex-col gap-2.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-sky-400" />
-              <span className="text-xs font-medium text-zinc-200">
-                Real-Time Auto-Save
-              </span>
-            </div>
-
-            {/* Status Pill */}
-            {saveStatus === "saving" && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                Saving...
-              </span>
-            )}
-            {saveStatus === "saved" && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <CheckCircle2 className="w-2.5 h-2.5" />
-                Saved
-              </span>
-            )}
-            {saveStatus === "idle" && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400/80 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Active
-              </span>
-            )}
-            {saveStatus === "error" && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-red-500/10 text-red-400 border border-red-500/20">
-                <AlertCircle className="w-2.5 h-2.5" />
-                Error
-              </span>
-            )}
-          </div>
-
-          <p className="text-[11px] text-zinc-500 leading-relaxed">
-            All changes to nodes, branches, and positions are automatically
-            saved permanently to <code className="text-zinc-400 font-mono">public/data/graph.json</code> in real-time.
-          </p>
-
-          {lastSaved && (
-            <div className="text-[10px] text-zinc-600 font-mono">
-              Last saved: {new Date(lastSaved).toLocaleTimeString()}
-            </div>
-          )}
+      <section className="flex flex-col gap-3" aria-label="Document persistence">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 text-xs text-zinc-200">
+            <input type="checkbox" checked={autosave} onChange={event => setAutosave(event.target.checked)} className="accent-sky-400" />
+            Autosave
+          </label>
+          <span role="status" className={saveStatus === "error" ? "text-xs text-red-400" : "text-xs text-zinc-400"}>
+            {saveStatus === "saving" ? "Saving..." : saveStatus === "error" ? "Error" : isDirty ? "Unsaved changes" : saveStatus === "saved" ? "Saved" : "Up to date"}
+          </span>
         </div>
-
-        <button
-          onClick={handleReload}
-          disabled={isReloading}
-          className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg 
-            bg-zinc-900/40 hover:bg-zinc-800/60 border border-white/5 hover:border-white/10 
-            transition-all text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer disabled:opacity-50 mt-1"
-        >
-          <RotateCcw
-            className={`w-3.5 h-3.5 text-zinc-500 ${
-              isReloading ? "animate-spin" : ""
-            }`}
-          />
-          Reload from Disk
+        <p className="text-[11px] text-zinc-500 leading-relaxed">Graph edits and settings are saved together. {autosave ? "Changes save automatically." : "Use Save now to commit your changes."}</p>
+        {saveError && <p role="alert" className="text-xs text-red-400 break-words">{saveError}</p>}
+        {draftError && <p role="alert" className="text-xs text-amber-400">{draftError}</p>}
+        <div className="flex gap-2">
+          <button type="button" onClick={() => void saveGraph()} disabled={saveStatus === "saving"}
+            className="flex-1 rounded-lg border border-sky-400/30 px-3 py-2 text-xs text-sky-300 disabled:opacity-50">Save now</button>
+          <button type="button" onClick={exportDocument} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-300">Export JSON</button>
+        </div>
+        <button type="button" onClick={handleReload} disabled={isReloading || saveStatus === "saving"}
+          title={isDirty ? "Keeps your edits as a recovery draft before loading the disk copy" : "Load the latest saved graph and settings"}
+          className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-400 disabled:opacity-50">
+          {isReloading ? "Loading..." : isDirty ? "Load disk copy (keep draft)" : "Reload from disk"}
         </button>
-
-        {reloadStatus && (
-          <div className="text-xs text-emerald-400/80 text-center mt-1">
-            {reloadStatus}
-          </div>
-        )}
-      </div>
+        {hasRecoveryDraft && <div className="flex flex-col gap-2 text-xs text-amber-200">
+          <p>A local draft differs from the disk copy. Restoring it replaces this document with your draft.</p>
+          <button type="button" onClick={restoreDraft} className="rounded border border-amber-300/30 p-2">Restore local draft</button>
+          <button type="button" onClick={discardDraft} className="text-zinc-400">Discard local draft</button>
+        </div>}
+        {lastSaved && <span className="text-[10px] text-zinc-500">Last saved: {new Date(lastSaved).toLocaleTimeString()}</span>}
+        {reloadStatus && <span className="text-xs text-zinc-400">{reloadStatus}</span>}
+      </section>
 
       {/* Divider */}
       <div className="h-px bg-white/5" />
@@ -154,6 +112,13 @@ export function GlobalTab() {
               [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
           />
+        </label>
+
+        <label className="flex flex-col gap-2">
+          <span className="flex items-center justify-between text-xs text-zinc-400">Touch Sensitivity <span className="text-[10px] font-mono">{physics.touchSensitivity.toFixed(4)}</span></span>
+          <input type="range" min={0.0002} max={0.01} step={0.0001} value={physics.touchSensitivity}
+            onChange={event => updatePhysics({ touchSensitivity: Number(event.target.value) })}
+            className="w-full accent-white" />
         </label>
 
         <label className="flex flex-col gap-2">
@@ -195,7 +160,7 @@ export function GlobalTab() {
           <input
             type="range"
             min={0.1}
-            max={0.8}
+            max={0.5}
             step={0.02}
             value={physics.snapThreshold}
             onChange={(e) =>

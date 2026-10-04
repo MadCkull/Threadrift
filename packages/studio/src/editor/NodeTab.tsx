@@ -37,6 +37,7 @@ export function NodeTab() {
 
   const color = getLevelColor(node.level);
   const isRoot = node.id === graph.root;
+  const exits = graph.edges.filter(edge => edge.from === node.id);
 
   return (
     <div className="flex flex-col gap-5">
@@ -89,6 +90,22 @@ export function NodeTab() {
           placeholder="Node content..."
         />
       </label>
+
+      {exits.length > 1 && <label className="flex flex-col gap-1.5">
+        <span className="text-zinc-500 text-xs uppercase tracking-wider">Recommended path</span>
+        <select
+          value={node.recommendedEdgeId ?? ""}
+          onChange={event => updateNode(node.id, { recommendedEdgeId: event.target.value || undefined })}
+          className="w-full bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-sky-400"
+        >
+          <option value="">Automatic · straightest continuation</option>
+          {exits.map((edge, index) => <option key={edge.id} value={edge.id}>
+            {graph.nodes[edge.to]?.name ?? "Unknown destination"}
+            {exits.some(other => other.id !== edge.id && other.to === edge.to) ? ` · Route ${index + 1}` : ""}
+          </option>)}
+        </select>
+        <span className="text-xs text-zinc-500 leading-relaxed">Preselected for visitors. Their own route choice always takes priority.</span>
+      </label>}
 
       {/* Position Controls */}
       <div className="flex flex-col gap-3">

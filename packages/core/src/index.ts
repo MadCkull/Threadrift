@@ -4,3 +4,6 @@ export * from "./path-math";
 export * from "./physics";
 export * from "./spline";
 export * from "./topology";
+export * from "./validation";
+export * from "./route-geometry";
+export * from "./document";

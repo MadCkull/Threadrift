@@ -7,7 +7,6 @@
 //
 
 import type { GraphData, GraphEdge, GraphNode, Sequence } from "./types";
-import { CATMULL_VIRTUAL_DISTANCE } from "./constants";
 
 // ── Graph Query Helpers ─────────────────────────────────────
 
@@ -30,38 +29,94 @@ export function getMainOutgoing(graph: GraphData, id: number): GraphEdge | undef
 // ── Active Path ─────────────────────────────────────────────
 
 /**
- * Walk the graph from root following main edges,
- * respecting branch choices made by the user.
+ * Walk the graph from root, respecting explicit choices, author recommendations,
+ * and then automatic continuation based on the route's actual incoming edge.
  */
 export function getActivePath(
   graph: GraphData,
   branchChoices: Record<number, string>
 ): GraphNode[] {
-  const result: GraphNode[] = [];
+  return getActiveRoute(graph, branchChoices).nodes;
+}
+
+export interface ActiveRoute {
+  nodes: GraphNode[];
+  /** Exact connections matter when parallel edges share the same endpoints. */
+  edges: GraphEdge[];
+}
+
+/**
+ * Author recommendation, or deterministic automatic continuation.
+ *
+ * Chords describe the overall direction of travel through a fork. Shared spline
+ * endpoint tangents can make visibly different exits indistinguishable, and a
+ * node's computed tangent can inherit another parent at a merge. Use the actual
+ * incoming route edge instead: best heading alignment, shortest distance, edge ID.
+ * At the root (no incoming heading), prefer main, then distance and edge ID.
+ * This function does not record an explicit user choice.
+ */
+export function getRecommendedEdge(
+  graph: GraphData,
+  nodeId: number,
+  incomingEdge?: GraphEdge
+): GraphEdge | undefined {
+  const node = getNode(graph, nodeId);
+  if (!node) return undefined;
+  const exits = getOutgoing(graph, nodeId).filter(edge => {
+    const to = getNode(graph, edge.to);
+    return to && Number.isFinite(Math.hypot(to.x - node.x, to.y - node.y)) &&
+      Math.hypot(to.x - node.x, to.y - node.y) > 0;
+  });
+  const recommended = exits.find(edge => edge.id === node.recommendedEdgeId);
+  if (recommended) return recommended;
+
+  const previous = incomingEdge?.to === nodeId ? getNode(graph, incomingEdge.from) : undefined;
+  const arrivalLength = previous ? Math.hypot(node.x - previous.x, node.y - previous.y) : 0;
+  const hasHeading = Number.isFinite(arrivalLength) && arrivalLength > 0;
+  const headingX = hasHeading ? (node.x - previous!.x) / arrivalLength : 0;
+  const headingY = hasHeading ? (node.y - previous!.y) / arrivalLength : 0;
+  const scored = exits.map(edge => {
+    const to = getNode(graph, edge.to)!;
+    const dx = to.x - node.x;
+    const dy = to.y - node.y;
+    const distance = Math.hypot(dx, dy);
+    // Quantization gives near-identical headings a transitive, order-independent tie.
+    const alignment = hasHeading ? Math.round(((dx / distance) * headingX + (dy / distance) * headingY) * 1e9) / 1e9 : 0;
+    return { edge, distance, alignment };
+  });
+  scored.sort((a, b) => {
+    if (hasHeading && a.alignment !== b.alignment) return b.alignment - a.alignment;
+    if (!hasHeading && a.edge.type !== b.edge.type) return a.edge.type === "main" ? -1 : 1;
+    if (a.distance !== b.distance) return a.distance - b.distance;
+    return a.edge.id < b.edge.id ? -1 : a.edge.id > b.edge.id ? 1 : 0;
+  });
+  return scored[0]?.edge;
+}
+
+export function getActiveRoute(
+  graph: GraphData,
+  branchChoices: Record<number, string>
+): ActiveRoute {
+  const result: ActiveRoute = { nodes: [], edges: [] };
+  const seen = new Set<number>();
   let curr: number | undefined = graph.root;
 
   while (curr !== undefined) {
     const node = getNode(graph, curr);
-    if (!node) break;
-    result.push(node);
+    if (!node || seen.has(curr)) break;
+    seen.add(curr);
+    result.nodes.push(node);
 
     let nextEdge: GraphEdge | undefined;
     const choice = branchChoices[curr];
     if (choice) {
-      nextEdge = graph.edges.find((e) => e.id === choice);
+      nextEdge = graph.edges.find((e) => e.id === choice && e.from === curr);
     }
-    if (!nextEdge) {
-      nextEdge = getMainOutgoing(graph, curr);
-    }
-    // Auto-follow if there is exactly ONE outgoing branch (e.g. a merge edge)
-    if (!nextEdge) {
-      const allOutgoing = getOutgoing(graph, curr);
-      if (allOutgoing.length === 1) {
-        nextEdge = allOutgoing[0];
-      }
-    }
+    if (!nextEdge) nextEdge = getRecommendedEdge(graph, curr, result.edges[result.edges.length - 1]);
 
-    curr = nextEdge ? nextEdge.to : undefined;
+    if (!nextEdge || !getNode(graph, nextEdge.to) || seen.has(nextEdge.to)) break;
+    result.edges.push(nextEdge);
+    curr = nextEdge.to;
   }
 
   return result;
@@ -98,22 +153,21 @@ export function computeTopology(graph: GraphData): TopologyResult {
     currentSeqId: number,
     parentSeqId: number | null
   ) {
-    const node = getNode(graph, nodeId);
-    if (!node || node.seqId !== null) return;
-
-    node.level = currentLevel;
-    node.seqId = currentSeqId;
-    node.parentSeqId = parentSeqId;
-
-    const outgoing = getOutgoing(graph, node.id);
-    outgoing.forEach((edge) => {
-      if (edge.type === "main") {
-        traverse(edge.to, currentLevel, currentSeqId, parentSeqId);
-      } else {
-        seqCounter++;
-        traverse(edge.to, currentLevel + 1, seqCounter, currentSeqId);
-      }
-    });
+    // Iterative depth-first traversal also handles long imported chains safely.
+    const pending = [{ nodeId, currentLevel, currentSeqId, parentSeqId }];
+    while (pending.length) {
+      const item = pending.pop()!;
+      const node = getNode(graph, item.nodeId);
+      if (!node || node.seqId !== null) continue;
+      node.level = item.currentLevel;
+      node.seqId = item.currentSeqId;
+      node.parentSeqId = item.parentSeqId;
+      const children = getOutgoing(graph, node.id).map((edge) => edge.type === "main"
+        ? { ...item, nodeId: edge.to }
+        : { nodeId: edge.to, currentLevel: item.currentLevel + 1,
+            currentSeqId: ++seqCounter, parentSeqId: item.currentSeqId });
+      pending.push(...children.reverse());
+    }
   }
 
   // Traverse from root
@@ -159,7 +213,7 @@ export function computeTopology(graph: GraphData): TopologyResult {
       sorted.push(curr);
       const outMain = getMainOutgoing(graph, curr.id);
       const next = outMain ? getNode(graph, outMain.to) : undefined;
-      if (!next || sorted.includes(next)) break;
+      if (!next || next.seqId !== seq.id || sorted.includes(next)) break;
       curr = next;
     }
     seq.nodes = sorted;

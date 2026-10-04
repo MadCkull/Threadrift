@@ -3,7 +3,10 @@
 // ============================================================
 
 import { type StateCreator } from "zustand";
+import { PersistenceCoordinator, type Draft } from "../persistence/coordinator";
+import type { PersistenceOptions } from "../persistence/types";
 import { getRestingNodeIndex, resolvePathSelection, selectForwardPath } from "./navigation";
+import { advanceMotion, routeState, targetPatch, type InputSession, type InputSource } from "./controller";
 
 import {
   type GraphData,
@@ -12,25 +15,26 @@ import {
   type GraphJSON,
   type Sequence,
   computeTopology,
-  getActivePath,
+  getActiveRoute,
+  createRouteGeometry,
+  progressToDistance,
+  distanceToProgress,
+  parseGraphDocument,
+  serializeGraphDocument,
+  DEFAULT_DOCUMENT_SETTINGS,
+  PHYSICS_BOUNDS,
+  type GraphDocument,
+  type JsonObject,
+  type PhysicsSettings,
+  type RouteGeometry,
   getMainOutgoing,
   getNode,
-  clearPathCache,
   MAX_BRANCH_DEPTH,
-  SCROLL_SENSITIVITY,
-  TOUCH_SENSITIVITY,
-  SNAP_STRENGTH,
-  SNAP_THRESHOLD,
 } from "@threadrift/core";
 
 // ── Store Interface ─────────────────────────────────────────
 
-export interface PhysicsConfig {
-  scrollSensitivity: number;
-  touchSensitivity: number;
-  snapStrength: number;
-  snapThreshold: number;
-}
+export type PhysicsConfig = PhysicsSettings;
 
 export interface ThreadriftStore {
   // Graph data
@@ -38,11 +42,20 @@ export interface ThreadriftStore {
   nextNodeId: number;
   sequences: Sequence[];
   isLoaded: boolean;
+  graphError: string | null;
+  graphRevision: number;
 
   // Persistence & Auto-Save
-  saveStatus: "idle" | "saving" | "saved" | "error";
+  saveStatus: "idle" | "dirty" | "saving" | "saved" | "error";
   lastSaved: number | null;
   autoSaveEnabled: boolean;
+  isDirty: boolean;
+  saveError: string | null;
+  draftError: string | null;
+  documentRevision: number;
+  hasRecoveryDraft: boolean;
+  extensions?: JsonObject;
+  settingsExtensions?: JsonObject;
 
   // Physics settings
   physics: PhysicsConfig;
@@ -51,6 +64,15 @@ export interface ThreadriftStore {
   scrollTarget: number;
   scrollCurrent: number;
   activePath: GraphNode[];
+  activeEdges: GraphEdge[];
+  routeGeometry: RouteGeometry | null;
+  distanceCurrent: number;
+  distanceTarget: number;
+  travelDirection: -1 | 0 | 1;
+  travelledEdges: string[];
+  inputSession: InputSession | null;
+  inputGeneration: number;
+  navigationElement: HTMLElement | null;
   branchChoices: Record<number, string>;
   isScrolling: boolean;
 
@@ -58,13 +80,16 @@ export interface ThreadriftStore {
   selectedNode: number | null;
   selectedEdge: string | null;
   editorOpen: boolean;
+  nodeDragActive: boolean;
+  setNodeDragActive: (active: boolean) => void;
   mergeModeSource: number | null;
 
   // Discovery state
   visitedNodes: Set<number>;
 
   // Actions — Graph
-  loadGraph: (data: GraphJSON) => void;
+  loadGraph: (data: GraphJSON, options?: { revision?: string | null; source?: "disk" | "import" | "draft" }) => void;
+  importGraph: (data: GraphJSON) => void;
   recompute: () => void;
   addNode: (parentId: number, mode: "main" | "branch") => GraphNode | null;
   removeNode: (id: number) => void;
@@ -75,6 +100,12 @@ export interface ThreadriftStore {
 
   // Actions — Persistence
   saveGraph: () => Promise<boolean>;
+  reloadGraph: (options?: { preserveDraft?: boolean }) => Promise<boolean>;
+  setAutoSaveEnabled: (enabled: boolean) => void;
+  configurePersistence: (options: PersistenceOptions | false) => void;
+  attachPersistence: () => () => void;
+  restoreDraft: () => void;
+  discardDraft: () => void;
   setSaveStatus: (status: "idle" | "saving" | "saved" | "error") => void;
 
   // Actions — Physics
@@ -86,6 +117,13 @@ export interface ThreadriftStore {
   setIsScrolling: (val: boolean) => void;
   setBranchChoice: (nodeId: number, edgeId: string | null) => void;
   refreshActivePath: () => void;
+  setNavigationElement: (element: HTMLElement | null) => void;
+  beginInput: (source: InputSource) => number | null;
+  travelInput: (deltaDistance: number, sessionId: number) => void;
+  endInput: (sessionId: number) => void;
+  cancelInput: () => void;
+  advanceNavigation: (dtMs: number, reducedMotion: boolean) => void;
+  stepNavigation: (direction: -1 | 1) => void;
 
   // Actions — UI
   selectNode: (id: number | null) => void;
@@ -99,127 +137,107 @@ export interface ThreadriftStore {
   markVisited: (nodeId: number) => void;
 
   // Serialization
-  toJSON: () => GraphJSON;
-}
-
-// ── Debounced Auto-Save Helper ───────────────────────────────
-
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
-
-function triggerAutoSave(
-  get: () => ThreadriftStore,
-  set: (fn: (state: ThreadriftStore) => Partial<ThreadriftStore>) => void
-) {
-  const state = get();
-  if (!state.isLoaded || !state.autoSaveEnabled) return;
-
-  set(() => ({ saveStatus: "saving" }));
-
-  if (autoSaveTimer) clearTimeout(autoSaveTimer);
-
-  autoSaveTimer = setTimeout(async () => {
-    try {
-      const data = get().toJSON();
-
-      // 1. Instant local storage backup
-      try {
-        localStorage.setItem("threadrift-graph-backup", JSON.stringify(data));
-      } catch {
-        /* ignore */
-      }
-
-      // 2. Persist permanently to disk via Next.js API route
-      const res = await fetch("/api/graph", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      if (!res.ok) {
-        throw new Error(`Auto-save failed with status ${res.status}`);
-      }
-
-      set(() => ({ saveStatus: "saved", lastSaved: Date.now() }));
-
-      // Reset to idle status after 3s
-      setTimeout(() => {
-        if (get().saveStatus === "saved") {
-          set(() => ({ saveStatus: "idle" }));
-        }
-      }, 3000);
-    } catch (err) {
-      console.warn("[Threadrift AutoSave] Failed to save graph permanently:", err);
-      set(() => ({ saveStatus: "error" }));
-    }
-  }, 250);
+  toJSON: () => GraphDocument;
 }
 
 // ── Store Implementation ────────────────────────────────────
 
-export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) => ({
+/** Prepare an entire graph revision before publishing it to subscribers. */
+function prepareGraph(state: ThreadriftStore, candidate: GraphData, reset = false): Partial<ThreadriftStore> {
+  // Local connection deletion/movement restores automatic routing. Newly supplied
+  // invalid recommendations and invalid imports still fail validation below.
+  if (!reset) candidate = { ...candidate, nodes: Object.fromEntries(Object.entries(candidate.nodes).map(([id, node]) => {
+    const inherited = node.recommendedEdgeId && node.recommendedEdgeId === state.graph.nodes[id]?.recommendedEdgeId;
+    return [id, inherited && !candidate.edges.some(edge => edge.id === node.recommendedEdgeId && edge.from === node.id)
+      ? { ...node, recommendedEdgeId: undefined } : node];
+  })) };
+  let nextNodeId = state.nextNodeId;
+  for (const node of Object.values(candidate.nodes)) nextNodeId = Math.max(nextNodeId, node.id + 1);
+  const authored = serializeGraphDocument({ graph: candidate, nextNodeId, settings: DEFAULT_DOCUMENT_SETTINGS });
+  const graph: GraphData = { root: authored.root, nodes: authored.nodes, edges: authored.edges };
+  const { sequences } = computeTopology(graph);
+  // Serialization already validates every edge and detaches extension data.
+  const choices = reset ? {} : Object.fromEntries(Object.entries(state.branchChoices).filter(([id, edgeId]) =>
+    graph.edges.some((edge) => edge.id === edgeId && edge.from === Number(id))));
+  const route = getActiveRoute(graph, choices);
+  const activeIds = new Set(route.nodes.map((node) => node.id));
+  const branchChoices = Object.fromEntries(Object.entries(choices).filter(([id]) => activeIds.has(Number(id))));
+  const routeGeometry = createRouteGeometry(graph, sequences, route);
+  let index = reset ? 0 : Math.min(Math.floor(state.scrollCurrent), state.activePath.length - 1);
+  while (index > 0 && (route.nodes[index]?.id !== state.activePath[index]?.id ||
+    state.activeEdges.slice(0, index).some((edge, i) => route.edges[i]?.id !== edge.id))) index--;
+  index = Math.max(0, Math.min(index, route.nodes.length - 1));
+  const distance = routeGeometry.nodeDistances[index] ?? 0;
+  return { graph, sequences, activePath: route.nodes, activeEdges: route.edges, branchChoices, routeGeometry,
+    scrollCurrent: index, scrollTarget: index, distanceCurrent: distance, distanceTarget: distance,
+    inputSession: null, isScrolling: false, travelDirection: 0, graphError: null, graphRevision: state.graphRevision + 1,
+    travelledEdges: route.edges.slice(0, index).map((edge) => edge.id) };
+}
+
+export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) => {
+  let recovery: Draft | null = null;
+  let loadGeneration = 0;
+  const persistence = new PersistenceCoordinator({
+    snapshot: () => get().toJSON(), loaded: () => get().isLoaded,
+    autoSave: () => get().autoSaveEnabled, report: patch => set(patch),
+  });
+  return ({
   // Initial state
   graph: { nodes: {}, edges: [], root: 0 },
   nextNodeId: 0,
   sequences: [],
   isLoaded: false,
+  graphError: null,
+  graphRevision: 0,
 
   saveStatus: "idle",
   lastSaved: null,
   autoSaveEnabled: true,
+  isDirty: false, saveError: null, draftError: null, documentRevision: 0, hasRecoveryDraft: false,
 
-  physics: {
-    scrollSensitivity: SCROLL_SENSITIVITY,
-    touchSensitivity: TOUCH_SENSITIVITY,
-    snapStrength: SNAP_STRENGTH,
-    snapThreshold: SNAP_THRESHOLD,
-  },
+  physics: { ...DEFAULT_DOCUMENT_SETTINGS.physics },
 
   scrollTarget: 0,
   scrollCurrent: 0,
   activePath: [],
+  activeEdges: [],
+  routeGeometry: null,
+  distanceCurrent: 0,
+  distanceTarget: 0,
+  travelDirection: 0,
+  travelledEdges: [],
+  inputSession: null,
+  inputGeneration: 0,
+  navigationElement: null,
   branchChoices: {},
   isScrolling: false,
   selectedNode: null,
   selectedEdge: null,
   editorOpen: false,
+  nodeDragActive: false,
   mergeModeSource: null,
   visitedNodes: new Set<number>(),
 
   // ── Graph Actions ───────────────────────────────────────
 
-  loadGraph: (data) => {
-    const graph: GraphData = {
-      nodes: data.nodes,
-      edges: data.edges,
-      root: data.root,
-    };
-
-    // Restore visited nodes from localStorage
-    let visited = new Set<number>();
-    try {
-      const stored = localStorage.getItem("threadrift-visited");
-      if (stored) visited = new Set(JSON.parse(stored));
-    } catch {
-      /* ignore */
-    }
-
-    set({
-      graph,
-      nextNodeId: data.nextNodeId,
-      selectedNode: data.root,
-      visitedNodes: visited,
-      isLoaded: true,
-      saveStatus: "idle",
+  loadGraph: (input, options = {}) => {
+    const data = parseGraphDocument(input);
+    const graph: GraphData = { nodes: data.nodes, edges: data.edges, root: data.root };
+    const prepared = prepareGraph(get(), graph, true);
+    // Validation and geometry complete before any document or persistence state changes.
+    loadGeneration++;
+    set({ ...prepared, nextNodeId: data.nextNodeId, physics: { ...data.settings.physics },
+      autoSaveEnabled: data.settings.editor.autoSaveEnabled,
+      extensions: data.extensions, settingsExtensions: data.settings.extensions,
+      selectedNode: data.root, selectedEdge: null, mergeModeSource: null,
+      visitedNodes: new Set<number>(), isLoaded: true, hasRecoveryDraft: false,
     });
-    get().recompute();
+    persistence.accept(options.revision, options.source === "import" || options.source === "draft");
   },
+  importGraph: data => get().loadGraph(data, { source: "import" }),
 
   recompute: () => {
-    const { graph, branchChoices } = get();
-    clearPathCache();
-    const { sequences } = computeTopology(graph);
-    const activePath = getActivePath(graph, branchChoices);
-    set({ sequences, activePath });
+    set(prepareGraph(get(), get().graph));
   },
 
   addNode: (parentId, mode) => {
@@ -267,19 +285,13 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
       diverge: 0,
     };
 
-    set((state) => ({
-      graph: {
-        ...state.graph,
-        nodes: { ...state.graph.nodes, [newNode.id]: newNode },
-        edges: [...state.graph.edges, newEdge],
-      },
+    try { set({
+      ...prepareGraph(get(), { ...graph, nodes: { ...graph.nodes, [newNode.id]: newNode }, edges: [...graph.edges, newEdge] }),
       nextNodeId: nextNodeId + 1,
       selectedNode: newNode.id,
       selectedEdge: null,
-    }));
-
-    get().recompute();
-    triggerAutoSave(get, set);
+    }); } catch (error) { set({ graphError: String(error) }); return null; }
+    persistence.changed();
     return newNode;
   },
 
@@ -322,57 +334,37 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
       (e) => !nodesToDelete.has(e.from) && !nodesToDelete.has(e.to)
     );
 
-    set((state) => ({
-      graph: {
-        ...state.graph,
-        nodes: newNodes,
-        edges: newEdges,
-      },
+    set({
+      ...prepareGraph(get(), { ...graph, nodes: newNodes, edges: newEdges }),
       selectedNode: graph.root,
       selectedEdge: null,
-    }));
-
-    get().recompute();
-    triggerAutoSave(get, set);
+    });
+    persistence.changed();
   },
 
   updateNode: (id, patch) => {
-    set((state) => ({
-      graph: {
-        ...state.graph,
-        nodes: {
-          ...state.graph.nodes,
-          [id]: { ...state.graph.nodes[id], ...patch },
-        },
-      },
-    }));
-    get().recompute();
-    triggerAutoSave(get, set);
+    const state = get();
+    if (!state.graph.nodes[id]) return;
+    try { set(prepareGraph(state, { ...state.graph, nodes: { ...state.graph.nodes, [id]: { ...state.graph.nodes[id], ...patch } } })); }
+    catch (error) { set({ graphError: String(error) }); return; }
+    persistence.changed();
   },
 
   updateEdge: (id, patch) => {
-    set((state) => ({
-      graph: {
-        ...state.graph,
-        edges: state.graph.edges.map((e) =>
-          e.id === id ? { ...e, ...patch } : e
-        ),
-      },
-    }));
-    get().recompute();
-    triggerAutoSave(get, set);
+    const state = get();
+    if (!state.graph.edges.some((edge) => edge.id === id)) return;
+    try { set(prepareGraph(state, { ...state.graph, edges: state.graph.edges.map((edge) => edge.id === id ? { ...edge, ...patch } : edge) })); }
+    catch (error) { set({ graphError: String(error) }); return; }
+    persistence.changed();
   },
 
   removeEdge: (id) => {
-    set((state) => ({
-      graph: {
-        ...state.graph,
-        edges: state.graph.edges.filter((e) => e.id !== id),
-      },
+    const state = get();
+    set({
+      ...prepareGraph(state, { ...state.graph, edges: state.graph.edges.filter((edge) => edge.id !== id) }),
       selectedEdge: null,
-    }));
-    get().recompute();
-    triggerAutoSave(get, set);
+    });
+    persistence.changed();
   },
 
   mergeNode: (fromId, toId) => {
@@ -388,68 +380,166 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
       diverge: 0,
     };
 
-    set((state) => ({
-      graph: {
-        ...state.graph,
-        edges: [...state.graph.edges, newEdge],
-      },
+    try { set({
+      ...prepareGraph(get(), { ...graph, edges: [...graph.edges, newEdge] }),
       selectedEdge: newEdge.id,
       selectedNode: null,
-    }));
-
-    get().recompute();
-    triggerAutoSave(get, set);
+    }); } catch (error) { set({ graphError: String(error) }); return; }
+    persistence.changed();
   },
 
   // ── Persistence Actions ───────────────────────────────────
 
-  saveGraph: async () => {
-    set({ saveStatus: "saving" });
+  saveGraph: () => persistence.flush(),
+  configurePersistence: options => { loadGeneration++; persistence.configure(options); },
+  setAutoSaveEnabled: enabled => {
+    if (typeof enabled !== "boolean" || enabled === get().autoSaveEnabled) return;
+    set({ autoSaveEnabled: enabled });
+    persistence.changed();
+  },
+  reloadGraph: async (options = {}) => {
+    if (persistence.saving) { set({ saveError: "A save is in progress. Reload once it finishes." }); return false; }
+    if (get().isDirty && !options.preserveDraft) { set({ saveError: "Save your changes before reloading from disk." }); return false; }
+    if (get().isDirty && !persistence.backup()) {
+      set({ saveError: "Export your edits first; the latest recovery draft could not be stored." }); return false;
+    }
+    const retainedDraft = get().isDirty ? persistence.readDraft() : null;
+    if (get().isDirty && !retainedDraft) { set({ saveError: "Export your edits first; a recovery draft could not be stored." }); return false; }
+    const request = ++loadGeneration;
+    const version = persistence.currentVersion;
+    const writeEpoch = persistence.currentWriteEpoch;
+    const initial = !get().isLoaded;
     try {
-      const data = get().toJSON();
-      try {
-        localStorage.setItem("threadrift-graph-backup", JSON.stringify(data));
-      } catch {
-        /* ignore */
+      const loaded = await persistence.load();
+      const document = parseGraphDocument(loaded.document);
+      if (request !== loadGeneration || version !== persistence.currentVersion) return false;
+      if (persistence.saving || writeEpoch !== persistence.currentWriteEpoch) {
+        set({ saveError: "A save started during reload. Reload again to read its result." }); return false;
       }
-
-      const res = await fetch("/api/graph", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      if (!res.ok) throw new Error("Save failed");
-
-      set({ saveStatus: "saved", lastSaved: Date.now() });
-      setTimeout(() => {
-        if (get().saveStatus === "saved") {
-          set({ saveStatus: "idle" });
-        }
-      }, 3000);
+      const draft = initial ? persistence.readDraft() : null;
+      if (draft && draft.baseRevision === loaded.revision) {
+        get().loadGraph(draft.document, { revision: loaded.revision, source: "draft" });
+      } else {
+        get().loadGraph(document, { revision: loaded.revision, source: "disk" });
+        recovery = draft ?? retainedDraft;
+        set({ hasRecoveryDraft: !!recovery });
+      }
       return true;
-    } catch (err) {
-      console.warn("[Threadrift] Manual save failed:", err);
-      set({ saveStatus: "error" });
+    } catch (error) {
+      if (request === loadGeneration && version === persistence.currentVersion && !persistence.saving && writeEpoch === persistence.currentWriteEpoch) {
+        const draft = initial ? persistence.readDraft() : null;
+        if (draft) {
+          // Keep the draft's original precondition: never turn offline recovery into a blind overwrite.
+          get().loadGraph(draft.document, { revision: draft.baseRevision, source: "draft" });
+          set({ saveError: "Opened a local recovery draft. Disk could not be loaded; save will check for conflicts." });
+          return true;
+        }
+        set({ saveError: error instanceof Error ? error.message : "Could not load graph data." });
+      }
       return false;
     }
   },
-
-  setSaveStatus: (status) => set({ saveStatus: status }),
+  restoreDraft: () => {
+    if (!recovery) return;
+    const document = recovery.document;
+    recovery = null;
+    get().loadGraph(document, { source: "import" });
+  },
+  discardDraft: () => { recovery = null; persistence.discardDraft(); set({ hasRecoveryDraft: false }); },
+  attachPersistence: () => {
+    if (typeof window === "undefined") return () => persistence.detach();
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!get().isDirty) return;
+      persistence.backup(); event.preventDefault(); event.returnValue = "";
+    };
+    const hidden = () => { if (document.hidden) persistence.backup(); };
+    const pagehide = () => persistence.backup();
+    window.addEventListener("beforeunload", beforeUnload);
+    window.addEventListener("pagehide", pagehide);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      loadGeneration++;
+      window.removeEventListener("beforeunload", beforeUnload);
+      window.removeEventListener("pagehide", pagehide);
+      document.removeEventListener("visibilitychange", hidden);
+      persistence.detach();
+    };
+  },
+  setSaveStatus: status => set({ saveStatus: status }),
 
   // ── Physics Actions ───────────────────────────────────────
 
   updatePhysics: (patch) => {
-    set((state) => ({
-      physics: { ...state.physics, ...patch },
-    }));
+    const bounds = PHYSICS_BOUNDS;
+    const valid: Partial<PhysicsConfig> = {};
+    for (const key of Object.keys(bounds) as (keyof PhysicsConfig)[]) {
+      const value = patch[key];
+      if (value !== undefined && Number.isFinite(value)) valid[key] = Math.max(bounds[key][0], Math.min(bounds[key][1], value));
+    }
+    if (Object.keys(valid).some(key => valid[key as keyof PhysicsConfig] !== get().physics[key as keyof PhysicsConfig])) {
+      set(state => ({ physics: { ...state.physics, ...valid } }));
+      persistence.changed();
+    }
   },
 
   // ── Navigation Actions ──────────────────────────────────
 
-  setScrollTarget: (val) => set({ scrollTarget: val }),
-  setScrollCurrent: (val) => set({ scrollCurrent: val }),
+  setScrollTarget: (val) => {
+    const state = get();
+    if (!Number.isFinite(val) || !state.routeGeometry || state.nodeDragActive || state.inputSession) return;
+    set(targetPatch(state, progressToDistance(state.routeGeometry, val)));
+  },
+  setScrollCurrent: (val) => {
+    const state = get();
+    if (!Number.isFinite(val) || !state.routeGeometry || state.nodeDragActive) return;
+    // Legacy animation API may only advance within already-authorized travel.
+    if (val < Math.min(state.scrollCurrent, state.scrollTarget) || val > Math.max(state.scrollCurrent, state.scrollTarget)) return;
+    const distanceCurrent = progressToDistance(state.routeGeometry, val);
+    const scrollCurrent = distanceToProgress(state.routeGeometry, distanceCurrent);
+    set({ distanceCurrent, scrollCurrent, travelledEdges: state.activeEdges.slice(0, Math.ceil(scrollCurrent)).map((edge) => edge.id) });
+  },
   setIsScrolling: (val) => set({ isScrolling: val }),
+
+  setNavigationElement: (navigationElement) => set({ navigationElement }),
+  beginInput: (source) => {
+    const state = get();
+    if (!state.isLoaded || state.nodeDragActive || state.inputSession || !state.routeGeometry) return null;
+    const id = state.inputGeneration + 1;
+    set({ inputGeneration: id, inputSession: { id, source, blocked: false }, isScrolling: true });
+    return id;
+  },
+  travelInput: (delta, sessionId) => {
+    const state = get();
+    if (!Number.isFinite(delta) || delta === 0 || state.nodeDragActive ||
+      !state.inputSession || state.inputSession.id !== sessionId || state.inputSession.blocked || !state.routeGeometry) return;
+    const boundedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 2000);
+    const requested = state.distanceTarget + boundedDelta;
+    const patch = targetPatch(state, requested);
+    const progress = patch.scrollTarget ?? state.scrollTarget;
+    const reachedFork = delta < 0 && Number.isInteger(progress) && progress < state.scrollTarget &&
+      state.graph.edges.filter((edge) => edge.from === state.activePath[progress]?.id).length > 1;
+    const blocked = patch.distanceTarget !== requested || reachedFork;
+    set({ ...patch, inputSession: { ...state.inputSession, blocked } });
+  },
+  endInput: (sessionId) => {
+    if (get().inputSession?.id === sessionId) set({ inputSession: null, isScrolling: false });
+  },
+  cancelInput: () => {
+    const state = get();
+    if (state.inputSession || state.isScrolling || state.scrollTarget !== state.scrollCurrent) {
+      set({ inputSession: null, isScrolling: false, travelDirection: 0, scrollTarget: state.scrollCurrent, distanceTarget: state.distanceCurrent });
+    }
+  },
+  advanceNavigation: (dt, reducedMotion) => {
+    const patch = advanceMotion(get(), dt, reducedMotion);
+    if (patch) set(patch);
+  },
+  stepNavigation: (direction) => {
+    const state = get();
+    if (state.nodeDragActive || state.inputSession || state.isScrolling || state.scrollCurrent !== state.scrollTarget || !state.routeGeometry) return;
+    const next = direction > 0 ? Math.floor(state.scrollCurrent) + 1 : Math.ceil(state.scrollCurrent) - 1;
+    set(targetPatch(state, progressToDistance(state.routeGeometry, next)));
+  },
 
   setBranchChoice: (nodeId, edgeId) => {
     const state = get();
@@ -457,7 +547,8 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     if (restingIndex === null) return;
     const choiceIndex = state.activePath.findIndex((node) => node.id === nodeId);
     if (choiceIndex < restingIndex) return;
-    if (edgeId !== null && !state.graph.edges.some(
+    if (edgeId === null) edgeId = getMainOutgoing(state.graph, nodeId)?.id ?? null;
+    if (edgeId === null || !state.graph.edges.some(
       (edge) => edge.id === edgeId && edge.from === nodeId && state.graph.nodes[edge.to]
     )) return;
     if ((state.branchChoices[nodeId] ?? null) === edgeId) return;
@@ -466,30 +557,37 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     if (edgeId !== null) choices[nodeId] = edgeId;
     else delete choices[nodeId];
     const selection = resolvePathSelection(state, choices);
-    if (selection) set(selection);
+    if (selection) set({ ...selection, ...routeState(state, selection.branchChoices) });
   },
 
   refreshActivePath: () => {
-    const { graph, branchChoices } = get();
-    const activePath = getActivePath(graph, branchChoices);
-    set({ activePath });
+    get().recompute();
   },
 
   // ── UI Actions ──────────────────────────────────────────
 
   focusNode: (id) => {
-    const selection = selectForwardPath(get(), { nodeId: id });
-    if (selection) set(selection);
+    const state = get();
+    const selection = selectForwardPath(state, { nodeId: id });
+    if (selection) set({ ...selection, ...routeState(state, selection.branchChoices) });
   },
 
   focusEdge: (id) => {
-    const selection = selectForwardPath(get(), { edgeId: id });
-    if (selection) set(selection);
+    const state = get();
+    const selection = selectForwardPath(state, { edgeId: id });
+    if (selection) set({ ...selection, ...routeState(state, selection.branchChoices) });
   },
 
   selectNode: (id) => set({ selectedNode: id, selectedEdge: null }),
   selectEdge: (id) => set({ selectedEdge: id, selectedNode: null }),
-  toggleEditor: () => set((s) => ({ editorOpen: !s.editorOpen })),
+  setNodeDragActive: active => {
+    if (active) get().cancelInput();
+    set({ nodeDragActive: active });
+  },
+  toggleEditor: () => {
+    get().cancelInput();
+    set((s) => ({ editorOpen: !s.editorOpen }));
+  },
   setMergeMode: (sourceId) => set({ mergeModeSource: sourceId }),
 
   // ── Discovery ───────────────────────────────────────────
@@ -498,12 +596,6 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     set((state) => {
       const visited = new Set(state.visitedNodes);
       visited.add(nodeId);
-      // Persist to localStorage
-      try {
-        localStorage.setItem("threadrift-visited", JSON.stringify([...visited]));
-      } catch {
-        /* ignore */
-      }
       return { visitedNodes: visited };
     });
   },
@@ -511,13 +603,10 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
   // ── Serialization ───────────────────────────────────────
 
   toJSON: () => {
-    const { graph, nextNodeId } = get();
-    return {
-      version: "1.0",
-      nextNodeId,
-      root: graph.root,
-      nodes: graph.nodes,
-      edges: graph.edges,
-    };
+    const { graph, nextNodeId, physics, autoSaveEnabled, extensions, settingsExtensions } = get();
+    return serializeGraphDocument({ graph, nextNodeId, extensions, settings: {
+      physics, editor: { autoSaveEnabled }, ...(settingsExtensions ? { extensions: settingsExtensions } : {}),
+    } });
   },
 });
+};
