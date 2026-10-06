@@ -95,6 +95,11 @@ async function enabled(locator) {
   await locator.waitFor({ state: 'visible' });
   await locator.page().waitForFunction(el => !el.disabled, await locator.elementHandle());
 }
+async function toggleStudio(page) {
+  const close = page.getByRole('button', { name: 'Close editor', exact: true });
+  if (await close.count()) await close.click();
+  else await page.getByTitle('Toggle Threadrift Studio').click();
+}
 async function load(page) {
   await page.goto(baseURL, { waitUntil: 'networkidle' });
   await enabled(next(page));
@@ -193,7 +198,8 @@ try {
     let resized = await measure();
     assert(Math.abs(resized.width - initial.width) < .1); assert(Math.abs(resized.height - initial.height) < .1); assert.equal(resized.font, initial.font);
     assert(Math.abs(resized.dx - 24) < .1 && Math.abs(resized.dy - 24) < .1, JSON.stringify(resized));
-    await page.getByTitle('Toggle Threadrift Studio').click(); await page.waitForTimeout(500);
+    await toggleStudio(page); await page.waitForTimeout(500);
+    await page.getByRole('combobox', { name: 'Inspect', exact: true }).selectOption('node:0');
     await page.getByRole('button', { name: 'Anchors', exact: true }).click();
     await page.getByRole('spinbutton', { name: /Anchor Width/ }).fill('410');
     await page.getByRole('slider', { name: /Offset X/ }).fill('0');
@@ -277,7 +283,7 @@ try {
     await page.route('**/api/graph', route => route.request().method() === 'POST'
       ? route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }) : route.fallback());
     await load(page);
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
     await page.waitForTimeout(500);
     const session = await context.newCDPSession(page);
     await session.send('Emulation.setTouchEmulationEnabled', { enabled: true });
@@ -368,7 +374,7 @@ try {
     await next(page).hover();
     await page.mouse.wheel(0, 600);
     await noMovement(page, 0);
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
     await page.waitForTimeout(500);
     await page.getByText('Threadrift Studio', { exact: true }).hover();
     await page.mouse.wheel(0, 600);
@@ -377,12 +383,12 @@ try {
     await page.waitForTimeout(400);
     assert((await center(page, 0)).y < page.viewportSize().height / 2 - 20, 'Canvas wheel must travel with Studio open');
     await load(page);
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
     await page.waitForTimeout(500);
     await page.getByRole('region', { name: /Threadrift map/ }).focus();
     await page.keyboard.press('ArrowDown');
     await atNode(page, 1);
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
   });
 
   await run('keyboard offers route access through the optional menu', async page => {
@@ -517,7 +523,7 @@ try {
       else await route.fallback();
     });
     await crossroads(page, false);
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
     await page.waitForTimeout(500);
     await node(page, 1).click();
     const response = page.waitForResponse(item => item.url().endsWith('/api/graph') && item.request().method() === 'POST');
@@ -541,7 +547,7 @@ try {
       } else await route.fallback();
     });
     await load(page);
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
     await page.getByText('Threadrift Studio', { exact: true }).waitFor({ state: 'visible' });
     await page.waitForTimeout(500);
     const start = await center(page, 0);
@@ -566,7 +572,129 @@ try {
     const afterStaleMove = await center(page, 0);
     assert(Math.hypot(afterStaleMove.x - afterResize.x, afterStaleMove.y - afterResize.y) < 0.1);
     assert.equal(await node(page, 0).evaluate(el => el.closest('g.node-group').getAttribute('transform')), stoppedPosition);
-    await page.getByTitle('Toggle Threadrift Studio').click(); await atNode(page, 0);
+    await toggleStudio(page); await atNode(page, 0);
+  });
+
+  await run('contextual inspector preserves global controls and exposes only valid actions', async page => {
+    let writes = 0;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { writes++; return route.fulfill({ json: { ok: true } }); }
+      return route.fallback();
+    });
+    await load(page); await toggleStudio(page);
+    const inspect = page.getByRole('combobox', { name: 'Inspect', exact: true });
+    const inspector = page.getByRole('region', { name: 'Selection inspector', exact: true });
+    const absent = async name => assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${name} must be absent`);
+    const globals = async () => {
+      for (const name of [/Scroll Sensitivity/, /Touch Sensitivity/, /Snap Strength/, /Snap Threshold/]) {
+        const control = page.getByRole('slider', { name }); assert(await control.isVisible());
+        const box = await control.boundingBox(); assert(box.y >= 0 && box.y + box.height <= 900);
+      }
+    };
+    assert.equal(await inspect.inputValue(), '');
+    assert.equal(await inspector.locator('input,textarea').count(), 0);
+    await absent('Freeze camera'); await globals();
+    await inspect.selectOption('node:0');
+    await absent('Delete Node'); await absent('Add Main Child'); await absent('Reset to Follow');
+    assert(await page.getByRole('textbox', { name: 'Name', exact: true }).isVisible()); await globals();
+    await inspect.selectOption('node:7');
+    assert(await page.getByRole('button', { name: 'Add Branch Child', exact: true }).count());
+    await inspect.selectOption('edge:e-1-7');
+    assert.equal(await inspector.getByRole('textbox').count(), 0);
+    await absent('Freeze camera'); await absent('Anchors');
+    assert(await page.getByRole('slider', { name: /^Divergence/ }).count()); await globals();
+    await inspect.selectOption('edge:e-0-1');
+    assert.equal(await page.getByRole('slider', { name: /^Divergence/ }).count(), 0);
+    await page.getByRole('button', { name: 'Clear selection', exact: true }).click();
+    assert.equal(await inspect.inputValue(), ''); await globals();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    for (const name of ['Save now', 'Export JSON', 'Reload from disk']) assert(await page.getByRole('button', { name, exact: true }).isVisible());
+    await page.waitForTimeout(350); assert.equal(writes, 0, 'Selection and disclosure changes must never save the graph');
+    await page.screenshot({ path: `${output}/contextual-empty-editor.png` });
+  });
+
+  await run('contextual inspector handles level limits, deletion, and preserved selection on reopen', async page => {
+    await load(page); await toggleStudio(page);
+    const inspect = page.getByRole('combobox', { name: 'Inspect', exact: true });
+    await inspect.selectOption('node:7');
+    await page.getByRole('button', { name: 'Add Branch Child', exact: true }).click();
+    const added = await inspect.inputValue(); assert.notEqual(added, 'node:7');
+    assert.equal(await page.getByRole('button', { name: 'Add Branch Child', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Add Main Child', exact: true }).count(), 1);
+    await toggleStudio(page); await toggleStudio(page); assert.equal(await inspect.inputValue(), added);
+    await page.getByRole('button', { name: 'Merge to Node...', exact: true }).click();
+    await page.getByRole('button', { name: 'Delete Node', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Cancel Merge', exact: true }).count(), 0);
+    assert.equal(await inspect.inputValue(), 'node:0');
+    assert.equal(await inspect.locator(`option[value="${added}"]`).count(), 0);
+    await inspect.selectOption('edge:e-1-7');
+    await page.getByRole('button', { name: 'Delete Edge', exact: true }).click();
+    assert.equal(await inspect.inputValue(), '');
+    assert.equal(await page.getByRole('combobox', { name: 'Camera travel', exact: true }).count(), 0);
+  });
+
+  await run('contextual inspector keeps active camera and merge exits after deselection', async page => {
+    await load(page); await toggleStudio(page);
+    const inspect = page.getByRole('combobox', { name: 'Inspect', exact: true });
+    await inspect.selectOption('node:0');
+    await page.getByRole('button', { name: 'Position camera', exact: true }).click();
+    assert(await page.getByRole('spinbutton', { name: 'Node X', exact: true }).isDisabled());
+    await page.getByRole('button', { name: 'Clear selection', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Position camera', exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Return to route', exact: true }).click();
+    await inspect.selectOption('node:0');
+    await page.getByRole('button', { name: 'Merge to Node...', exact: true }).click();
+    await inspect.selectOption('edge:e-1-7');
+    await page.getByRole('button', { name: 'Cancel Merge', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Cancel Merge', exact: true }).count(), 0);
+    await inspect.selectOption('node:0');
+    await page.getByRole('button', { name: 'Merge to Node...', exact: true }).click();
+    await toggleStudio(page); await toggleStudio(page);
+    assert.equal(await page.getByRole('button', { name: 'Cancel Merge', exact: true }).count(), 0);
+  });
+
+  await run('contextual inspector deselects on blank taps but retains selection on canvas gestures', async page => {
+    await load(page); await toggleStudio(page);
+    const inspect = page.getByRole('combobox', { name: 'Inspect', exact: true });
+    await inspect.selectOption('node:0');
+    const point = await surfacePoint(page);
+    await page.mouse.click(point.x, point.y); assert.equal(await inspect.inputValue(), '');
+    await node(page, 0).click(); assert.equal(await inspect.inputValue(), 'node:0');
+    await page.mouse.move(point.x, point.y); await page.mouse.down();
+    await page.mouse.move(point.x - 30, point.y + 40, { steps: 4 }); await page.mouse.up();
+    assert.equal(await inspect.inputValue(), 'node:0');
+    await wheel(page, 100); assert.equal(await inspect.inputValue(), 'node:0');
+    await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
+    await page.mouse.click(point.x, point.y); assert.equal(await inspect.inputValue(), '');
+    assert(await page.getByRole('button', { name: 'Return to route', exact: true }).isVisible());
+  });
+
+  await run('contextual merge mode rejects unavailable targets and selects the new edge', async page => {
+    const fixture = structuredClone(browserFixture);
+    fixture.nodes = {
+      0: { id: 0, name: 'Root', content: '', x: 100, y: 100 },
+      1: { id: 1, name: 'Child', content: '', x: 160, y: 150 },
+      2: { id: 2, name: 'Target', content: '', x: 60, y: 200 },
+    };
+    fixture.edges = [{ id: 'main', from: 0, to: 1, type: 'main', curve: 0 }]; fixture.nextNodeId = 3;
+    let saved;
+    await page.route('**/api/graph', route => {
+      if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); return route.fulfill({ json: { ok: true } }); }
+      return route.fulfill({ json: fixture });
+    });
+    await load(page); await toggleStudio(page);
+    const inspect = page.getByRole('combobox', { name: 'Inspect', exact: true });
+    await inspect.selectOption('node:1');
+    await page.getByRole('button', { name: 'Merge to Node...', exact: true }).click();
+    // Root is an ancestor. Reject without leaving merge mode or mutating the document.
+    await node(page, 0).click();
+    assert.equal(await page.getByRole('button', { name: 'Cancel Merge', exact: true }).count(), 1);
+    await page.waitForTimeout(350); assert.equal(saved, undefined);
+    await node(page, 2).click();
+    assert((await inspect.inputValue()).startsWith('edge:'));
+    assert.equal(await page.getByRole('button', { name: 'Cancel Merge', exact: true }).count(), 0);
+    await page.waitForTimeout(350);
+    assert(saved.edges.some(edge => edge.from === 1 && edge.to === 2 && edge.type === 'branch'));
   });
 
   const cameraCenter = page => page.locator('[data-threadrift-camera]').evaluate(el => {
@@ -576,7 +704,8 @@ try {
   });
   const closePoint = (actual, expected, epsilon = .08) => assert(Math.hypot(actual.x - expected.x, actual.y - expected.y) < epsilon, JSON.stringify({ actual, expected }));
   async function studio(page) {
-    await page.getByTitle('Toggle Threadrift Studio').click();
+    await toggleStudio(page);
+    await page.getByRole('combobox', { name: 'Inspect', exact: true }).selectOption('node:0');
     await page.getByRole('button', { name: 'Freeze camera', exact: true }).waitFor(); await page.waitForTimeout(450);
   }
   await run('camera freeze commits node and view together then restores that view on return and reload', async page => {
@@ -599,7 +728,7 @@ try {
     closePoint(await cameraCenter(page), before);
     await wheel(page, 300); closePoint(await cameraCenter(page), before);
     await page.getByRole('button', { name: 'Return to route', exact: true }).click();
-    await page.getByTitle('Toggle Threadrift Studio').click(); await enabled(next(page));
+    await toggleStudio(page); await enabled(next(page));
     await next(page).click(); await atNode(page, 1); await previous(page).click(); await enabled(next(page));
     closePoint(await cameraCenter(page), before);
     await page.reload({ waitUntil: 'networkidle' }); await enabled(next(page)); closePoint(await cameraCenter(page), before);
@@ -631,7 +760,7 @@ try {
     await page.mouse.move(origin.x, origin.y); await page.mouse.down(); await page.mouse.move(origin.x - 50, origin.y - 30, { steps: 4 }); await page.mouse.up();
     await page.waitForTimeout(450); closePoint(saved.nodes[0].camera, before); closePoint(await cameraCenter(page), before);
     await page.getByRole('button', { name: 'Reset to Follow', exact: true }).click();
-    await page.getByRole('button', { name: 'Return to route', exact: true }).click(); await page.getByTitle('Toggle Threadrift Studio').click(); await atNode(page, 0);
+    await page.getByRole('button', { name: 'Return to route', exact: true }).click(); await toggleStudio(page); await atNode(page, 0);
   });
 
   await run('camera positioning pans only the view and numeric framing persists without moving nodes', async page => {
@@ -677,7 +806,8 @@ try {
     await load(page); await studio(page);
     const freeze = page.getByRole('button', { name: 'Freeze camera', exact: true });
     await freeze.focus(); await page.keyboard.press('Enter'); assert.equal(await freeze.getAttribute('aria-pressed'), 'true');
-    for (const name of ['Node', 'Edge', 'Anchors', 'Settings']) {
+    for (const name of ['Clear selection', 'Anchors', 'Settings']) {
+      await page.getByRole('button', { name, exact: true }).scrollIntoViewIfNeeded();
       const box = await page.getByRole('button', { name, exact: true }).boundingBox();
       assert(box && box.x >= 0 && box.x + box.width <= 391 && box.height >= 40);
     }

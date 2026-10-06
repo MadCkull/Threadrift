@@ -120,7 +120,7 @@ export function AnchorTab() {
       {/* Helper text */}
       <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
         <p className="text-[10px] text-emerald-400/80 leading-relaxed text-center">
-          X and Y position the content’s top-left corner relative to this node. Width sets the available layout space in pixels. Height, appearance and child sizing belong to your React component.
+          These settings apply when React content is attached to this node. X and Y position its top-left corner; width sets its layout space in pixels. Height and appearance belong to the React component.
         </p>
       </div>
     </div>

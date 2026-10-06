@@ -59,7 +59,10 @@ async function slider(name, value) {
   await input.fill(String(value));
   assert.equal(Number(await input.inputValue()), value);
 }
-async function settings() { await page.getByRole('button', { name: 'Settings', exact: true }).click(); }
+async function settings() {
+  const summary = page.getByRole('button', { name: 'Settings', exact: true });
+  if (!(await summary.evaluate(el => el.parentElement.open))) await summary.click();
+}
 async function openStudio() {
   await page.getByTitle('Toggle Threadrift Studio').click();
   await page.getByText('Threadrift Studio', { exact: true }).waitFor();
@@ -86,7 +89,6 @@ try {
   await selectFork();
   await settings();
   await page.getByRole('checkbox', { name: 'Autosave', exact: true }).uncheck();
-  await page.getByRole('button', { name: 'Node', exact: true }).click();
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Persistence audit fork');
   await page.getByRole('textbox', { name: 'Content', exact: true }).fill('Durable text\nUnicode: café 🎯');
   await page.getByLabel('Recommended path', { exact: false }).selectOption('e-1-7');
@@ -100,7 +102,7 @@ try {
     return { x: point.x, y: point.y };
   });
   await page.mouse.click(point.x, point.y);
-  await page.getByRole('button', { name: 'Edge', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Inspect', exact: true }).selectOption('edge:e-1-7');
   await slider(/^Curve/, -.24);
   await page.getByRole('button', { name: 'End', exact: true }).click();
   await slider(/^Curve/, .31); await slider(/^Divergence/, -.12);
@@ -126,7 +128,6 @@ try {
   for (const [name, value] of [[/Scroll Sensitivity/, .0023], [/Touch Sensitivity/, .0034], [/Snap Strength/, .27], [/Snap Threshold/, .34]]) {
     assert.equal(Number(await page.getByRole('slider', { name }).inputValue()), value);
   }
-  await page.getByRole('button', { name: 'Node', exact: true }).click();
   assert.equal(await page.getByRole('textbox', { name: 'Name', exact: true }).inputValue(), 'Persistence audit fork');
   assert.equal(await page.getByLabel('Recommended path', { exact: false }).inputValue(), 'e-1-7');
   results.push({ name: 'Full browser reload restores durable document and settings', status: 'passed' });
@@ -147,7 +148,6 @@ try {
   await page.getByRole('checkbox', { name: 'Autosave', exact: true }).uncheck();
   await page.getByRole('button', { name: 'Freeze camera', exact: true }).click();
   await page.getByRole('combobox', { name: 'View destination', exact: true }).selectOption('1');
-  await page.getByRole('button', { name: 'Node', exact: true }).click();
   const beforeCamera = await disk();
   await page.getByRole('spinbutton', { name: 'Node X', exact: true }).fill('765'); await page.keyboard.press('Enter');
   await page.getByRole('spinbutton', { name: 'Camera X', exact: true }).fill('640'); await page.keyboard.press('Enter');
@@ -159,7 +159,7 @@ try {
     const point = path.getPointAtLength(path.getTotalLength() * .2).matrixTransform(path.getScreenCTM()); return { x: point.x, y: point.y };
   });
   await page.mouse.click(cameraEdgePoint.x, cameraEdgePoint.y);
-  await page.getByRole('button', { name: 'Edge', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Inspect', exact: true }).selectOption('edge:e-1-7');
   await page.getByRole('combobox', { name: 'Camera travel', exact: true }).selectOption('direct');
   await page.getByRole('spinbutton', { name: 'Move starts (%)', exact: true }).fill('20'); await page.keyboard.press('Enter');
   await page.getByRole('spinbutton', { name: 'Move ends (%)', exact: true }).fill('80'); await page.keyboard.press('Enter');

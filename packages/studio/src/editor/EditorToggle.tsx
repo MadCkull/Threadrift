@@ -7,6 +7,7 @@ import { useThreadrift } from "@threadrift/react";
 export function EditorToggle() {
   const editorOpen = useThreadrift((s) => s.editorOpen);
   const toggleEditor = useThreadrift((s) => s.toggleEditor);
+  if (editorOpen) return null;
 
   return (
     <motion.button

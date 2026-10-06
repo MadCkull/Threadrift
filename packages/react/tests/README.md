@@ -62,6 +62,12 @@ The final production build passed 27/27 Chromium/Edge browser scenarios with no 
 
 See [CAMERA.md](../../../CAMERA.md) for the authoring and document contract. Navigation evidence is under `.turbo/browser-artifacts/chromium/`; persistence evidence is under `.turbo/browser-artifacts/persistence/`. All persistence writes used the separate `.turbo` fixture, and the user's graph hash remained unchanged.
 
+## Contextual inspector verification (2026-10-05)
+
+Studio tests use the Inspect picker or canvas selection instead of the removed Node/Edge tabs. Settings and Anchors are native disclosures. The close button replaces the floating toggle while the panel is open. Five new browser scenarios cover empty/node/edge visibility, fixed navigation sliders, hierarchy limits, deletion and reopening, camera/merge exits after deselection, blank taps versus gestures, and actual merge success/invalid-target rejection. The deletion scenario also removes an active merge source and verifies its mode is cleared.
+
+Core passed 42 tests and React passed 99. The full Edge run passed 32/32 scenarios and all five isolated real-disk persistence scenarios passed. Firefox and WebKit each passed six focused scenarios selected with `THREADRIFT_TEST_FILTER='contextual|camera tools'`; Firefox needed execution outside the process sandbox. Their runners also list four Chromium-only touch skips outside this filter; these were not full cross-browser runs. After the final merge-source cleanup, React tests, the production build and six focused Edge scenarios passed again. The full pre-cleanup Edge report is preserved under `.turbo/contextual-browser/full-chromium-report.json`. All writes targeted the isolated fixture or were intercepted, and the real graph hash was unchanged.
+
 ## Physical input acceptance
 
 On each available mouse, trackpad, or phone:

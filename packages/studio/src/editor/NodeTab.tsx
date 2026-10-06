@@ -9,9 +9,9 @@ import {
   GitFork,
   Trash2,
   Merge,
-  XCircle,
 } from "lucide-react";
-import { getLevelColor } from "@threadrift/core";
+import { getLevelColor, getNodeEditCapabilities } from "@threadrift/core";
+import { AnchorTab } from "./AnchorTab";
 import { NodeCameraControls, NodePositionControls } from "./CameraControls";
 
 export function NodeTab() {
@@ -39,6 +39,7 @@ export function NodeTab() {
   const color = getLevelColor(node.level);
   const isRoot = node.id === graph.root;
   const exits = graph.edges.filter(edge => edge.from === node.id);
+  const capabilities = getNodeEditCapabilities(graph, node.id);
 
   return (
     <div className="flex flex-col gap-5">
@@ -110,6 +111,10 @@ export function NodeTab() {
 
       <NodePositionControls id={node.id} />
       <NodeCameraControls id={node.id} />
+      <details className="border-t border-white/10 pt-2">
+        <summary role="button" className="min-h-11 cursor-pointer py-3 text-sm text-zinc-300 focus-visible:outline-sky-400">Anchors</summary>
+        <AnchorTab />
+      </details>
 
       {/* Divider */}
       <div className="h-px bg-white/5" />
@@ -119,7 +124,7 @@ export function NodeTab() {
         <span className="text-zinc-500 text-xs uppercase tracking-wider mb-1">
           Actions
         </span>
-        <button
+        {capabilities.canAddMain && <button
           onClick={() => addNode(node.id, "main")}
           className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg 
             bg-zinc-900/40 hover:bg-zinc-800/60 border border-white/5 hover:border-white/10 
@@ -127,8 +132,8 @@ export function NodeTab() {
         >
           <GitBranchPlus className="w-4 h-4 text-zinc-500" />
           Add Main Child
-        </button>
-        <button
+        </button>}
+        {capabilities.canAddBranch && <button
           onClick={() => addNode(node.id, "branch")}
           className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg 
             bg-zinc-900/40 hover:bg-zinc-800/60 border border-white/5 hover:border-white/10 
@@ -136,33 +141,17 @@ export function NodeTab() {
         >
           <GitFork className="w-4 h-4 text-zinc-500" />
           Add Branch Child
-        </button>
+        </button>}
 
-        {/* Merge Mode Toggle */}
-        {mergeModeSource === node.id ? (
-          <button
-            onClick={() => setMergeMode(null)}
-            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg 
-              bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/30 
-              transition-all text-sm text-amber-400 cursor-pointer"
-          >
-            <XCircle className="w-4 h-4" />
-            Cancel Merge
-          </button>
-        ) : (
-          <button
-            onClick={() => setMergeMode(node.id)}
-            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg 
-              bg-zinc-900/40 hover:bg-zinc-800/60 border border-white/5 hover:border-white/10 
-              transition-all text-sm text-zinc-300 hover:text-white cursor-pointer"
-          >
-            <Merge className="w-4 h-4 text-zinc-500" />
-            Merge to Node...
-          </button>
-        )}
+        {mergeModeSource === null && capabilities.mergeTargets.length > 0 && <button
+          onClick={() => setMergeMode(node.id)}
+          className="flex min-h-11 items-center gap-2.5 rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800">
+          <Merge className="w-4 h-4 text-zinc-500" />Merge to Node...
+        </button>}
 
         {!isRoot && (
           <button
+            title="Also removes descendants that lose all incoming connections"
             onClick={() => {
               removeNode(node.id);
             }}

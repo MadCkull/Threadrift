@@ -1,131 +1,82 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { useEffect, useRef } from "react";
 import { useThreadrift } from "@threadrift/react";
 import { NodeTab } from "./NodeTab";
 import { EdgeTab } from "./EdgeTab";
-import { GlobalTab } from "./GlobalTab";
-import { AnchorTab } from "./AnchorTab";
+import { GlobalTab, NavigationSettings } from "./GlobalTab";
 import { CameraToolbar } from "./CameraControls";
-import {
-  CircleDot,
-  Spline,
-  SlidersHorizontal,
-  X,
-  Merge,
-  Anchor,
-} from "lucide-react";
-
-type TabId = "node" | "edge" | "anchors" | "global";
-
-const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "node", label: "Node", icon: <CircleDot className="w-3.5 h-3.5" /> },
-  { id: "edge", label: "Edge", icon: <Spline className="w-3.5 h-3.5" /> },
-  { id: "anchors", label: "Anchors", icon: <Anchor className="w-3.5 h-3.5" /> },
-  {
-    id: "global",
-    label: "Settings",
-    icon: <SlidersHorizontal className="w-3.5 h-3.5" />,
-  },
-];
+import { Merge, MousePointer2, X } from "lucide-react";
 
 export function EditorPanel() {
-  const editorOpen = useThreadrift((s) => s.editorOpen);
-  const toggleEditor = useThreadrift((s) => s.toggleEditor);
-  const selectedNode = useThreadrift((s) => s.selectedNode);
-  const selectedEdge = useThreadrift((s) => s.selectedEdge);
-  const mergeModeSource = useThreadrift((s) => s.mergeModeSource);
+  const editorOpen = useThreadrift(s => s.editorOpen);
+  const toggleEditor = useThreadrift(s => s.toggleEditor);
+  const selectedNode = useThreadrift(s => s.selectedNode);
+  const selectedEdge = useThreadrift(s => s.selectedEdge);
+  const graph = useThreadrift(s => s.graph);
+  const selectNode = useThreadrift(s => s.selectNode);
+  const selectEdge = useThreadrift(s => s.selectEdge);
+  const mergeModeSource = useThreadrift(s => s.mergeModeSource);
+  const setMergeMode = useThreadrift(s => s.setMergeMode);
+  const saveStatus = useThreadrift(s => s.saveStatus);
+  const isDirty = useThreadrift(s => s.isDirty);
+  const saveError = useThreadrift(s => s.saveError);
+  const draftError = useThreadrift(s => s.draftError);
+  const hasRecoveryDraft = useThreadrift(s => s.hasRecoveryDraft);
+  const node = selectedNode === null ? undefined : graph.nodes[selectedNode];
+  const edge = graph.edges.find(edge => edge.id === selectedEdge);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (contentRef.current) contentRef.current.scrollTop = 0; }, [selectedNode, selectedEdge]);
+  if (!editorOpen) return null;
 
-  // Auto-switch tab based on selection
-  const autoTab: TabId = selectedEdge ? "edge" : selectedNode !== null ? "node" : "node";
-  const [manualTab, setManualTab] = useState<TabId | null>(null);
-  const activeTab = manualTab ?? autoTab;
-  useEffect(() => { setManualTab(null); }, [selectedNode, selectedEdge]);
-
-  const handleTabClick = (id: TabId) => {
-    setManualTab(id);
-  };
-
-  return (
-    <AnimatePresence>
-      {editorOpen && (
-        <motion.div
-          initial={{ x: "100%", opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: "100%", opacity: 0 }}
-          transition={{
-            type: "spring",
-            damping: 30,
-            stiffness: 300,
-            mass: 0.8,
-          }}
-          className="fixed top-0 right-0 z-[150] h-full w-80 max-w-full
-            bg-black/70 backdrop-blur-2xl border-l border-white/5 
-            flex flex-col overflow-hidden shadow-2xl shadow-black/80 pointer-events-auto"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
-              <h2 className="text-sm font-medium text-white tracking-wide">
-                Threadrift Studio
-              </h2>
-            </div>
-            <button
-              onClick={toggleEditor}
-              className="w-7 h-7 flex items-center justify-center rounded-md 
-                hover:bg-zinc-800/60 transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4 text-zinc-500" />
-            </button>
+  return <aside aria-label="Threadrift Studio" data-threadrift-controls=""
+    className="fixed top-0 right-0 z-[150] h-[100dvh] w-80 max-w-full border-l border-white/10 bg-zinc-950 text-zinc-200 shadow-2xl flex flex-col overflow-hidden pointer-events-auto">
+    <header className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
+      <div>
+        <h2 className="text-sm font-medium">Threadrift Studio</h2>
+        <p role="status" className="mt-1 text-xs text-zinc-400">{saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed" : isDirty ? "Unsaved changes" : "Up to date"}</p>
+      </div>
+      <button type="button" aria-label="Close editor" onClick={toggleEditor} className="flex h-11 w-11 items-center justify-center rounded-md hover:bg-zinc-800 focus-visible:outline-sky-400"><X size={18} /></button>
+    </header>
+    <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <label className="mb-4 flex flex-col gap-2 text-xs text-zinc-400">Inspect
+        <select aria-label="Inspect" value={node ? `node:${node.id}` : edge ? `edge:${edge.id}` : ""}
+          onChange={event => {
+            const value = event.target.value;
+            if (value.startsWith("edge:")) selectEdge(value.slice(5));
+            else selectNode(value ? Number(value.slice(5)) : null);
+          }} className="min-h-11 w-full min-w-0 rounded-md border border-white/10 bg-zinc-900 px-2 text-zinc-100 focus:outline-sky-400">
+          <option value="">Nothing selected</option>
+          <optgroup label="Nodes">{Object.values(graph.nodes).map(node => <option key={node.id} value={`node:${node.id}`}>{node.name || "Node"} · {node.id}</option>)}</optgroup>
+          <optgroup label="Edges">{graph.edges.map(edge => <option key={edge.id} value={`edge:${edge.id}`}>{graph.nodes[edge.from]?.name || edge.from} → {graph.nodes[edge.to]?.name || edge.to} · {edge.id}</option>)}</optgroup>
+        </select>
+      </label>
+      <CameraToolbar />
+      {(saveError || draftError) && <p role="alert" className="mb-3 break-words text-xs text-red-300">{saveError || draftError}</p>}
+      {hasRecoveryDraft && <p role="status" className="mb-3 text-xs text-amber-200">A local recovery draft is available in Settings below.</p>}
+      {mergeModeSource !== null && <div role="status" className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">
+        <span className="flex items-center gap-2"><Merge size={16} />Choose a target for {graph.nodes[mergeModeSource]?.name || "this node"}.</span>
+        <button type="button" onClick={() => setMergeMode(null)} className="min-h-11 rounded-md border border-amber-500/30">Cancel Merge</button>
+      </div>}
+      <section aria-label="Selection inspector">
+        {(node || edge) ? <>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-400">{node ? `Node · Level ${node.level ?? 1}` : "Edge"}</h3>
+            <button type="button" aria-label="Clear selection" onClick={() => selectNode(null)} className="min-h-11 rounded-md px-2 text-xs text-zinc-400 hover:bg-zinc-800 focus-visible:outline-sky-400">Deselect</button>
           </div>
-
-          <CameraToolbar />
-          {/* Merge Mode Banner */}
-          {mergeModeSource !== null && (
-            <div className="mx-4 mt-3 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 
-              flex items-center gap-2.5 text-amber-400 text-xs">
-              <Merge className="w-4 h-4 shrink-0" />
-              <span>
-                <strong>Merge Mode</strong> — Click a target node on the canvas
-                to create a merge edge.
-              </span>
-            </div>
-          )}
-
-          {/* Tab Bar */}
-          <div className="flex px-4 pt-4 gap-1">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => handleTabClick(tab.id)}
-                className={`flex flex-1 min-w-0 flex-col items-center gap-1 px-1 py-2 rounded-md text-xs transition-colors cursor-pointer ${
-                  activeTab === tab.id
-                    ? "bg-zinc-800/80 text-white border border-white/10"
-                    : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40 border border-transparent"
-                }`}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Tab Content */}
-          <div className="flex-1 overflow-y-auto px-5 py-4 custom-scrollbar">
-            {activeTab === "node" && <NodeTab />}
-            {activeTab === "edge" && <EdgeTab />}
-            {activeTab === "anchors" && <AnchorTab />}
-            {activeTab === "global" && <GlobalTab />}
-          </div>
-
-          {/* Footer */}
-          <div className="px-5 py-3 border-t border-white/5 text-[10px] text-zinc-700 text-center tracking-wider uppercase">
-            Threadrift Engine v1.0
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
+          {node ? <NodeTab key={node.id} /> : <EdgeTab key={edge!.id} />}
+        </> : <div className="flex items-start gap-3 py-6 text-sm text-zinc-400">
+          <MousePointer2 size={18} className="mt-0.5 shrink-0" />
+          <p>Select a node or edge to edit it.</p>
+        </div>}
+      </section>
+      <details className="mt-6 border-t border-white/10 pt-3">
+        <summary role="button" className="min-h-11 cursor-pointer py-3 text-sm font-medium focus-visible:outline-sky-400">Settings</summary>
+        <GlobalTab />
+      </details>
+    </div>
+    <section aria-label="Navigation settings" className="max-h-[40dvh] shrink-0 overflow-y-auto border-t border-white/10 bg-zinc-900 px-4 py-3">
+      <NavigationSettings />
+    </section>
+  </aside>;
 }

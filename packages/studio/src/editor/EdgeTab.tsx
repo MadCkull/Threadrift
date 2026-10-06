@@ -145,8 +145,8 @@ export function EdgeTab() {
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
           />
           <p className="text-[10px] text-zinc-700 leading-relaxed">
-            Controls where the branch splits from the parent's tangent.
-            Negative = earlier split, Positive = later split.
+            Rotates the departure direction from the parent’s tangent.
+            Negative and positive values turn in opposite directions.
           </p>
         </label>
       )}

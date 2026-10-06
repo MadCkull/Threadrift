@@ -7,6 +7,39 @@
 //
 
 import type { GraphData, GraphEdge, GraphNode, Sequence } from "./types";
+import { MAX_BRANCH_DEPTH } from "./constants";
+import { MIN_TRAVEL_LENGTH } from "./validation";
+
+/** Structural availability shared by the inspector and merge-target highlighting. */
+export function getNodeEditCapabilities(graph: GraphData, id: number) {
+  const node = graph.nodes[id];
+  if (!node) return { canAddMain: false, canAddBranch: false, mergeTargets: [] as number[] };
+  const incoming = new Map<number, number[]>();
+  const connected = new Set<number>();
+  for (const edge of graph.edges) {
+    const parents = incoming.get(edge.to) ?? [];
+    parents.push(edge.from);
+    incoming.set(edge.to, parents);
+    if (edge.from === id) connected.add(edge.to);
+  }
+  // Connecting to an ancestor would introduce a directed cycle.
+  const ancestors = new Set<number>([id]);
+  const pending = [id];
+  for (let i = 0; i < pending.length; i++) {
+    for (const parent of incoming.get(pending[i]) ?? []) {
+      if (!ancestors.has(parent)) { ancestors.add(parent); pending.push(parent); }
+    }
+  }
+  const mergeTargets = Object.values(graph.nodes).filter(target => {
+    const distance = Math.hypot(target.x - node.x, target.y - node.y);
+    return !ancestors.has(target.id) && !connected.has(target.id) && Number.isFinite(distance) && distance > MIN_TRAVEL_LENGTH;
+  }).map(target => target.id);
+  return {
+    canAddMain: !graph.edges.some(edge => edge.from === id && edge.type === "main"),
+    canAddBranch: (node.level ?? 1) < MAX_BRANCH_DEPTH,
+    mergeTargets,
+  };
+}
 
 // ── Graph Query Helpers ─────────────────────────────────────
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   computeTopology, createRouteGeometry, distanceToProgress, getActivePath,
   getActiveRoute, getRecommendedEdge, getPathLength, progressToDistance, sampleRoute,
-  validateGraphData, validateGraphJSON,
+  validateGraphData, validateGraphJSON, getNodeEditCapabilities,
   parseGraphDocument, serializeGraphDocument, DEFAULT_DOCUMENT_SETTINGS, PHYSICS_BOUNDS,
   type GraphJSON,
 } from "../src";
@@ -321,4 +321,20 @@ test("document validation checks geometry on branches outside the default route"
   const value = graph();
   value.edges.find(edge => edge.id === "left")!.curve = Number.MAX_VALUE;
   assert.throws(() => parseGraphDocument(value), /derived geometry/);
+});
+
+
+test("editor actions respect hierarchy, main exits, and merge topology", () => {
+  const value = graph(); computeTopology(value);
+  assert.equal(getNodeEditCapabilities(value, 0).canAddMain, false);
+  assert.equal(getNodeEditCapabilities(value, 0).canAddBranch, true);
+  assert.deepEqual(getNodeEditCapabilities(value, 0).mergeTargets, [3]);
+  assert.deepEqual(getNodeEditCapabilities(value, 3).mergeTargets, []);
+  value.nodes[2].level = 3;
+  assert.equal(getNodeEditCapabilities(value, 2).canAddMain, true);
+  assert.equal(getNodeEditCapabilities(value, 2).canAddBranch, false);
+  assert.deepEqual(getNodeEditCapabilities(value, 2).mergeTargets, [1]);
+  value.nodes[1].x = value.nodes[2].x; value.nodes[1].y = value.nodes[2].y;
+  assert.deepEqual(getNodeEditCapabilities(value, 2).mergeTargets, []);
+  assert.deepEqual(getNodeEditCapabilities(value, 999), { canAddMain: false, canAddBranch: false, mergeTargets: [] });
 });

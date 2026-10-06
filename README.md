@@ -1,112 +1,88 @@
-# 🌌 Threadrift
+<a href="#try-the-playground">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/readme-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/brand/readme-light.png">
+    <img src="assets/brand/readme-dark.png" width="1600" alt="Threadrift. Give your story somewhere to go. Build interactive roadmaps, branching stories, and portfolios people can explore. Explore the playground.">
+  </picture>
+</a>
 
-> **A fluid, path-traversing spatial graph engine for non-linear storytelling, interactive roadmaps, and node-driven web experiences.**
+# Threadrift
 
----
+**Turn connected content into a journey people can follow.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Turborepo](https://img.shields.io/badge/monorepo-Turborepo-ef4444.svg)](https://turbo.build)
-[![Bun](https://img.shields.io/badge/runtime-Bun-f472b6.svg)](https://bun.sh)
-[![GSAP](https://img.shields.io/badge/motion-GSAP-88CE02.svg)](https://greensock.com)
+Threadrift is a React engine for spatial storytelling. Place your content on nodes, connect them with flowing paths, and let visitors scroll, swipe, or use the keyboard to travel through the story. At a fork, they can choose what to explore next.
 
----
+**[Try the playground ↓](#try-the-playground)** · [Build a story](#bring-your-react-content) · [Documentation](DOCUMENTATION.md) · [Camera authoring](CAMERA.md)
 
-## ⚡ The Origin Story
+## A different way to tell the story
 
-### *How It Started*
-It began as a simple itch: *"Why are all web portfolios and stories linear top-to-bottom scroll dumps or clunky Figma-style canvas pan-and-zoom viewers?"* 
+Imagine a portfolio where each project opens into its process. A roadmap where people follow the work that matters to them. A story that offers another perspective at the next fork.
 
-We didn't want users freely panning around an endless void lost in 2D space. We wanted users to **travel *through* nodes and paths**, riding along organic spline curves, taking branching choices at critical intersections, and exploring interactive narrative trees without ever losing their sense of momentum or orientation.
+Threadrift gives those connections a place, a path, and a sense of movement.
 
-### *How It Ended Up*
-What was supposed to be a small interactive script evolved into **Threadrift**: a full-scale, modular spatial engine with:
-- Dedicated **vector spline math** (Catmull-Rom + Bézier branch interpolation)
-- Multi-input gesture physics with **magnetic node snapping**
-- **Zero-drift spatial HTML anchors** rendered directly in the camera coordinate space
-- A complete, built-in **Visual Studio Editor (`@threadrift/studio`)** with real-time persistence, drag-and-drop node placement, dynamic edge curve bending, and anchor positioning.
+| You bring | Threadrift brings |
+| --- | --- |
+| Ideas worth connecting | Smooth, path-constrained travel through your graph |
+| Stories with more than one direction | Branches, recommended routes, and intentional choices at nodes |
+| Your own React components | Node-relative HTML anchors that retain native interaction and their own styling |
+| A composition worth exploring | Saved camera views and adjustable transitions between them |
+| A work in progress | An embedded visual editor with graph editing, export, autosave, and recovery drafts |
 
----
+## Try the playground
 
-## ✨ Features
-
-- 🧭 **Path-Constrained Navigation**: Travel along active paths and make intentional branching decisions. Direction locked to node rest stops for zero accidental turns.
-- 🧲 **Magnetic Snap Physics**: Time-based spline motion with exact node stops and a single animation driver.
-- 📐 **Dual-Curve Splines**: Smooth Catmull-Rom splines for main trunks, cubic Béziers with start/end curve bias and divergence angles for branch junctions.
-- ⚓ **Spatial HTML Anchoring**: Embed React / HTML content in a separate native interaction layer that follows the SVG camera (`<Threadrift.Node>`).
-- 🛠️ **Built-in Studio Suite**:
-  - **Node Tab**: Add main/branch children, merge nodes, rename, delete (with automatic recursive orphaned node cleanup).
-  - **Edge Tab**: Adjust start and end curve sweeps, tweak branch divergence, and delete connections.
-  - **Anchors Tab**: Set node-relative top-left offsets ($X$, $Y$) and the available layout width for attached React content. Height and appearance remain component-owned.
-  - **Settings Tab**: Live tuning of scroll sensitivity, touch sensitivity, snap strength, and auto-save controls.
-- 💾 **Document Persistence**: Versioned graph and settings JSON, queued autosave, manual save/export, browser recovery drafts, and atomic local disk writes with conflict protection. See [PERSISTENCE.md](PERSISTENCE.md).
-
----
-
-## 📦 Packages & Architecture
-
-Threadrift is structured as a performant Turborepo monorepo:
-
-| Package | Description |
-|---|---|
-| [`@threadrift/core`](./packages/core) | Pure TypeScript mathematical foundation: Catmull-Rom & Bézier splines, graph topology algorithms, magnetic physics, gesture parsing. |
-| [`@threadrift/react`](./packages/react) | React context, store (Zustand), SVG renderer, 60fps GSAP camera loop, navigation listeners, and `<Threadrift.Node>` spatial anchors. |
-| [`@threadrift/studio`](./packages/studio) | Floating dark-mode in-browser visual editor panel for manipulating nodes, edges, spatial anchors, and global physics in real-time. |
-| [`apps/playground`](./apps/playground) | Next.js 14 playground app showcasing full spatial UI anchoring and real-time auto-saving. |
-
----
-
-## 🚀 Quick Start
-
-### 1. Clone & Install
+Use **Bun 1.3.14**, the workspace's declared package manager, and a full local checkout containing `apps/playground`.
 
 ```bash
-git clone https://github.com/your-username/threadrift.git
-cd threadrift
 bun install
-```
-
-### 2. Run the Playground & Studio
-
-```bash
+bun run build
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to explore the interactive canvas and open the Studio Editor!
+Open **[localhost:3000](http://localhost:3000)**. Scroll into the map, stop at a junction, and choose another route. Then open Studio, select a node, and start shaping your own journey.
 
----
+> **Checkout note:** `apps/playground` currently lives in a separate local Git checkout and is not tracked by the root repository. The playground steps require that directory to be present; cloning the root repository alone does not currently provide the complete demo workspace. The library packages are in this repository.
 
-## 💻 Usage Example
+The initial build prepares the library outputs before the development watchers start. The playground saves authoring changes to its local graph file; export a copy from Studio before experimenting with a map you want to keep.
+
+## Bring your React content
+
+The engine owns the route. Your components own their content and appearance.
+
+The example below runs inside the workspace's Tailwind-enabled playground. It provides its own graph and disables persistence, so it needs no graph API endpoint. In another host, configure Tailwind to scan the React and Studio package sources as `apps/playground/tailwind.config.ts` does.
 
 ```tsx
+"use client";
+
+import type { GraphJSON } from "@threadrift/core";
 import { Threadrift, ThreadriftApp } from "@threadrift/react";
 import { EditorPanel, EditorToggle } from "@threadrift/studio";
 
-export default function MySpatialStory() {
-  return (
-    <main className="relative w-full h-screen bg-zinc-950 overflow-hidden">
-      {/* Root Provider */}
-      <Threadrift.Root>
-        {/* Main Canvas & Navigation */}
-        <ThreadriftApp>
-          {/* Spatial HTML Element anchored to Node 0 */}
-          <Threadrift.Node id={0}>
-            <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-white w-64 shadow-xl">
-              <h3 className="font-bold text-sky-400">Chapter 1: The Root</h3>
-              <p className="text-sm text-zinc-400 mt-2">
-                This UI is glued to Node 0 and tracks camera motion with zero drift.
-              </p>
-            </div>
-          </Threadrift.Node>
+const story: GraphJSON = {
+  version: "4.0",
+  nextNodeId: 2,
+  root: 0,
+  nodes: {
+    "0": { id: 0, name: "An idea", content: "", x: 0, y: 0 },
+    "1": { id: 1, name: "The next chapter", content: "", x: 480, y: -320 },
+  },
+  edges: [{ id: "opening", from: 0, to: 1, type: "main", curve: 0 }],
+};
 
-          {/* Spatial HTML Element anchored to Node 1 */}
+export default function MyStory() {
+  return (
+    <main className="relative h-screen overflow-hidden bg-zinc-950 text-white">
+      <Threadrift.Root initialData={story} persistence={false}>
+        <ThreadriftApp>
+          <Threadrift.Node id={0}>
+            <article className="rounded-2xl border border-sky-200/20 bg-zinc-900 p-6">
+              <h1 className="text-2xl font-semibold">Every story starts somewhere.</h1>
+              <p className="mt-3 text-zinc-300">Scroll to follow this one.</p>
+            </article>
+          </Threadrift.Node>
           <Threadrift.Node id={1}>
-            <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-xl text-white w-64 shadow-xl">
-              <h3 className="font-bold text-emerald-400">Chapter 2: The Fork</h3>
-            </div>
+            <h2 className="text-3xl font-semibold">Now make it yours.</h2>
           </Threadrift.Node>
         </ThreadriftApp>
-
-        {/* Visual Studio Panel (Toggleable) */}
         <EditorPanel />
         <EditorToggle />
       </Threadrift.Root>
@@ -115,11 +91,35 @@ export default function MySpatialStory() {
 }
 ```
 
----
+`Threadrift.Node` is a position-only container. Set offsets and layout width in the selected node's **Anchors** controls; keep sizing, typography, and styling on your own components. Anchored content stays in CSS pixels as the camera moves.
 
-## 🎮 Navigation Controls
+## Shape it in Studio
 
-`Threadrift.Node` is an unstyled positioning container for your React content. Its top-left starts 24px right and below its node by default; Studio → Anchors edits X/Y and width per node. `(0, 0)` aligns it exactly with the node. Width defaults to 320 CSS pixels, height grows with normal-flow content, and canvas motion does not scale your component. Put visual styling on your child component; use `width: 100%` when it should fill the anchor. Existing v1/v2 maps load into v3 with their offsets preserved and legacy anchor scaling removed.
+Select a node or an edge to reveal its inspector. Add branches, join paths, bend curves, position content, and set camera views directly in the map.
+
+- **Nodes:** edit content, create main or branch children, choose recommended exits, and merge into valid destinations.
+- **Edges:** adjust curve shape, divergence, and camera transition timing.
+- **Camera:** freeze the view while editing, capture a composition, or return to following the route.
+- **Persistence:** export JSON, save manually, enable autosave, and recover browser drafts. The playground's local endpoint protects against conflicting writes.
+
+Saved documents use **v4**. Older v1/v2/v3 maps migrate on load. See [persistence and recovery](PERSISTENCE.md) and [camera authoring](CAMERA.md) for the complete contracts.
+
+## Explore naturally
+
+| Input | Action |
+| --- | --- |
+| Mouse wheel / trackpad | Travel forward and backward on the active route |
+| Touch | Swipe up to advance; swipe down to return |
+| Keyboard | Focus the map, then use Up/Down or PageUp/PageDown |
+| Previous / Next | Move between stops with the on-screen controls |
+| Change route | Choose a destination while resting at a junction |
+
+Forward travel follows the selected or recommended route. Explicit turns happen at exact node rest. Reverse travel follows the edges you actually took, and reduced-motion preferences remove travel interpolation.
+
+<details>
+<summary><strong>Detailed navigation and embedding behavior</strong></summary>
+
+`Threadrift.Node` is an unstyled positioning container for your React content. Its top-left starts 24px right and below its node by default; Studio → selected node → Anchors edits X/Y and width per node. `(0, 0)` aligns it exactly with the node. Width defaults to 320 CSS pixels, height grows with normal-flow content, and canvas motion does not scale your component. Put visual styling on your child component; use `width: 100%` when it should fill the anchor. Existing v1/v2/v3 maps migrate to v4 with offsets preserved, legacy anchor scaling removed, and saved camera views absent unless authored.
 
 - **Trackpad / Mouse Wheel**: Vertical scrolling travels forward/backward along the selected route. Horizontal input never silently selects another route. Wheel units are normalized, and input is scoped to the map.
 - **Junctions**: Continue through the preselected route without a mandatory choice. Priority is your explicit choice, then the author's recommended path, then the straightest continuation relative to the previous node. Equally straight exits prefer the closest destination, then a stable edge ID. At the root, where there is no incoming direction, a main exit is preferred.
@@ -141,22 +141,39 @@ Embedded content and custom controls can opt out of navigation with `data-thread
 
 Imported graphs are validated before being published: a valid root, unique IDs, finite geometry, existing endpoints, and no directed cycles or zero-length connections are required. Failed imports leave the previous graph intact. Valid graph edits cancel active gestures and settle at the last surviving node in the travelled prefix.
 
-## Navigation verification
+</details>
 
-Build core first, then run `bun run --filter @threadrift/core test` and `bun run --filter @threadrift/react test`. The suites cover strict rest, route precedence, generated DAGs, spline geometry, exact merge/parallel-edge history, input replay, and all complete sample routes. Test fixtures are independent of local persisted playground data.
+## Inside the workspace
 
-An opt-in `createInputRecorder(viewerElement)` export records bounded event traces in memory. Its `snapshot()`, `toJSON()`, `clear()`, and `stop()` methods support local hardware diagnosis; it never sends data or records page text. See the [browser test setup and hardware checklist](packages/react/tests/README.md) for integration checks. Simulated touch/wheel events do not certify physical OS momentum.
+| Package | Responsibility |
+| --- | --- |
+| [`@threadrift/core`](packages/core) | Graph validation, topology, spline geometry, document contracts, and camera resolution |
+| [`@threadrift/react`](packages/react) | React composition, Zustand state, SVG rendering, navigation, and HTML anchors |
+| [`@threadrift/studio`](packages/studio) | Contextual node/edge inspectors, camera tools, and persistence controls |
+| `apps/playground` | Next.js demo and local persistence endpoint, available in the full local workspace |
+
+The dependency direction is `core → react → studio → playground`. These are local workspace packages; the setup above does not assume published npm releases.
+
+## Go deeper
+
+| Guide | What you will find |
+| --- | --- |
+| [Documentation](DOCUMENTATION.md) | Package structure, concepts, and API reference |
+| [Camera authoring](CAMERA.md) | Saved views, previews, and transition windows |
+| [Persistence](PERSISTENCE.md) | Document versions, adapters, recovery, and conflict handling |
+| [Browser checks and input verification](packages/react/tests/README.md) | Integration checks and physical-device acceptance guidance |
+| [Brand assets](assets/brand/README.md) | Approved logo, dark/light README cards, and editable source |
+
+Build core first, then run the core and React suites:
+
+```bash
+bun run --filter @threadrift/core build
+bun run --filter @threadrift/core test
+bun run --filter @threadrift/react test
+```
+
+The tests cover route selection, graph geometry, camera authoring, and persistence behavior. Browser input simulations complement physical-device testing; they do not certify OS gesture momentum.
 
 ---
 
-## 📄 Documentation
-
-Looking for the complete manual? Check out [DOCUMENTATION.md](./DOCUMENTATION.md).
-
-The current [document and persistence contract](PERSISTENCE.md) describes saved fields, schema migration, storage adapters, conflict recovery, and how to add future settings. Studio Settings includes **Save now**, **Export JSON**, and safe disk reload with draft recovery.
-
----
-
-## 📜 License
-
-MIT © [Threadrift Contributors](LICENSE)
+**Have a story with more than one way through it? [Start exploring.](#try-the-playground)**

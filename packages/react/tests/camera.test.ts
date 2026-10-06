@@ -18,6 +18,22 @@ function setup() {
   store.getState().configurePersistence(false); store.getState().loadGraph(fixture()); store.getState().toggleEditor();
   return store;
 }
+
+test("editor selection starts empty, survives reopening, and cannot retain a deleted merge source", () => {
+  const s = setup();
+  assert.equal(s.getState().selectedNode, null);
+  s.getState().selectNode(1);
+  s.getState().setMergeMode(1);
+  s.getState().toggleEditor();
+  assert.equal(s.getState().mergeModeSource, null);
+  s.getState().toggleEditor();
+  assert.equal(s.getState().selectedNode, 1);
+  s.getState().setMergeMode(1);
+  s.getState().removeNode(1);
+  assert.equal(s.getState().mergeModeSource, null);
+  assert.equal(s.getState().graph.nodes[1], undefined);
+  assert.equal(s.getState().selectedNode, 0);
+});
 test("freeze captures the resolved mid-motion view and blocks all graph travel", () => {
   const s = setup(); s.getState().setScrollTarget(1); s.getState().advanceNavigation(16, false);
   const before = resolveCamera(s.getState()), progress = s.getState().scrollCurrent;

@@ -7,7 +7,7 @@ import { GraphNodeComponent } from "./GraphNode";
 import { GraphEdgeComponent } from "./GraphEdge";
 import { GraphLabels } from "./GraphLabels";
 import { JunctionControls } from "./JunctionControls";
-import { CANVAS_SIZE, CAMERA_SCALE, getNode, type Point } from "@threadrift/core";
+import { CANVAS_SIZE, CAMERA_SCALE, getNode, getNodeEditCapabilities, type Point } from "@threadrift/core";
 import { resolveCamera } from "../store/camera-state";
 import { edgeBounds, overlaps, viewBounds } from "./viewport";
 
@@ -30,6 +30,7 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
   const selectedEdge = useThreadrift(s => s.selectedEdge);
   const mergeModeSource = useThreadrift(s => s.mergeModeSource);
   const cameraMode = useThreadrift(s => s.cameraMode);
+  const mergeTargets = useMemo(() => new Set(mergeModeSource === null ? [] : getNodeEditCapabilities(graph, mergeModeSource).mergeTargets), [graph, mergeModeSource]);
   const [size, setSize] = useState({ width: 1000, height: 1000 });
   const curveBounds = useMemo(() => edgeBounds(graph, sequences), [graph, sequences]);
   const touchAction = useThreadrift(s => {
@@ -117,7 +118,53 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
     return () => { unsubscribe(); observer.disconnect(); };
   }, [store, graph, activeEdges, visibleNodeIdsStr, visibleEdgesStr, children]);
 
-  // A selection is a recognized tap, never a pointer-down side effect.
+  // Only a completed blank-surface tap clears editor selection; swipes retain it.
+  useEffect(() => {
+    const element = wrapperRef.current!;
+    let tap: { id: number; x: number; y: number } | null = null;
+    const clear = () => { tap = null; };
+    const blank = (target: EventTarget | null) => target instanceof Element &&
+      !!target.closest("[data-threadrift-surface]") &&
+      !target.closest("[data-threadrift-node], [data-threadrift-edge], [data-threadrift-controls], [data-threadrift-content]");
+    const down = (event: PointerEvent) => {
+      const state = store.getState();
+      if (tap) { clear(); return; }
+      if (state.editorOpen && state.cameraMode !== "position" && state.mergeModeSource === null &&
+        event.isPrimary && event.button === 0 && !event.ctrlKey && !event.metaKey && blank(event.target)) {
+        tap = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      }
+    };
+    const move = (event: PointerEvent) => {
+      if (tap?.id === event.pointerId && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) >= 8) clear();
+    };
+    const up = (event: PointerEvent) => {
+      const pending = tap;
+      clear();
+      const state = store.getState();
+      if (pending?.id === event.pointerId && !event.defaultPrevented && blank(event.target) &&
+        Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 8 &&
+        state.editorOpen && state.cameraMode !== "position" && state.mergeModeSource === null) state.selectNode(null);
+    };
+    const other = (event: PointerEvent) => { if (tap && tap.id !== event.pointerId) clear(); };
+    element.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerdown", other, true);
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", clear, true);
+    window.addEventListener("blur", clear);
+    window.addEventListener("resize", clear);
+    return () => {
+      element.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerdown", other, true);
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", clear, true);
+      window.removeEventListener("blur", clear);
+      window.removeEventListener("resize", clear);
+    };
+  }, [store]);
+
+  // A visitor route selection is a recognized tap, never a pointer-down side effect.
   useEffect(() => {
     const element = wrapperRef.current!;
     let tap: { pointer: number; x: number; y: number; target: Element; revision: number; node?: number; edge?: string } | null = null;
@@ -233,6 +280,7 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
     event.stopPropagation();
     dragCleanup.current?.();
     if (state.mergeModeSource !== null && id !== state.mergeModeSource) {
+      if (!getNodeEditCapabilities(state.graph, state.mergeModeSource).mergeTargets.includes(id)) return;
       state.mergeNode(state.mergeModeSource, id); state.setMergeMode(null); return;
     }
     state.selectNode(id);
@@ -265,7 +313,7 @@ export const ThreadriftCanvas = memo(function ThreadriftCanvas({ children }: { c
             onPointerDown={(event, id) => { if (store.getState().editorOpen) { event.stopPropagation(); store.getState().selectEdge(id); } }} />)}
           {nodes.map(node => <GraphNodeComponent key={node.id} node={node} isRoot={node.id === graph.root}
             isActive={activePath.includes(node)} isVisited={visitedNodes.has(node.id)} isSelected={editorOpen && selectedNode === node.id}
-            isMergeTarget={editorOpen && mergeModeSource !== null && node.id !== mergeModeSource} onPointerDown={editNode} />)}
+            isMergeTarget={editorOpen && mergeTargets.has(node.id)} onPointerDown={editNode} />)}
           <GraphLabels nodes={activePath} />
           {editorOpen && selectedNode !== null && graph.nodes[selectedNode]?.camera && (() => {
             const node = graph.nodes[selectedNode], view = node.camera!;

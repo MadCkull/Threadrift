@@ -43,8 +43,10 @@ export function CameraToolbar() {
   const nodes = useThreadrift(s => s.graph.nodes);
   const selected = useThreadrift(s => s.selectedNode);
   const select = useThreadrift(s => s.selectNode);
-  return <div className="border-b border-white/5 px-4 py-3" data-threadrift-controls="">
-    <div className="flex gap-2">
+  const hasNode = selected !== null && !!nodes[selected];
+  if (!hasNode && mode === "follow" && !error && !notice) return null;
+  return <div className="mb-4 border-b border-white/10 pb-3" data-threadrift-controls="">
+    {hasNode && <div className="flex gap-2">
       <button type="button" aria-label="Freeze camera" title="Freeze camera while moving nodes" aria-pressed={mode === "freeze"}
         onClick={() => setMode(mode === "freeze" ? "follow" : "freeze")}
         className={`${button} min-h-11 flex-1 ${mode === "freeze" ? "bg-sky-500/15 text-sky-200" : ""}`}>
@@ -55,7 +57,7 @@ export function CameraToolbar() {
         className={`${button} min-h-11 flex-1 ${mode === "position" ? "bg-sky-500/15 text-sky-200" : ""}`}>
         <Hand size={16} aria-hidden="true" />Set view
       </button>
-    </div>
+    </div>}
     {mode !== "follow" && <div className="mt-2 flex flex-col gap-2">
       <p role="status" className="text-xs leading-relaxed text-zinc-400">{mode === "freeze" ? "View frozen. Moving a node saves this view with it." :
         mode === "position" ? "Drag the map to frame your view, then use current view on the selected node." : "Previewing a node view. Route travel is paused."}</p>
@@ -94,7 +96,7 @@ export function NodeCameraControls({ id }: { id: number }) {
     <span className="text-[11px] text-zinc-500">Current center: {x.toFixed(1)}, {y.toFixed(1)}</span>
     <div className="grid grid-cols-2 gap-2">
       <button type="button" className={button} onClick={() => preview(id)}><Play size={14} aria-hidden="true" />Preview view</button>
-      <button type="button" className={button} disabled={!node.camera} onClick={() => { setCamera(id, undefined); preview(id); }}><RotateCcw size={14} aria-hidden="true" />Reset to Follow</button>
+      {node.camera && <button type="button" className={button} onClick={() => { setCamera(id, undefined); preview(id); }}><RotateCcw size={14} aria-hidden="true" />Reset to Follow</button>}
     </div>
   </section>;
 }
@@ -133,6 +135,7 @@ export function NodePositionControls({ id }: { id: number }) {
   };
   return <fieldset disabled={positioning} className="flex flex-col gap-3 disabled:opacity-40" aria-label="Node position">
     <span className="text-xs uppercase tracking-wider text-zinc-500">Position</span>
+    {positioning && <p className="text-xs text-zinc-400">Return to route or finish setting the view to move this node.</p>}
     <div className="grid grid-cols-2 gap-3">{(["x", "y"] as const).map(axis => <div key={axis} className="flex flex-col gap-2">
       <input type="range" aria-label={`Node ${axis.toUpperCase()} slider`} min={Math.min(20, node[axis])} max={Math.max(1500, node[axis])} value={node[axis]}
         onPointerDown={event => {

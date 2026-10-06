@@ -36,7 +36,7 @@ import {
   type RouteGeometry,
   getMainOutgoing,
   getNode,
-  MAX_BRANCH_DEPTH,
+  getNodeEditCapabilities,
 } from "@threadrift/core";
 
 // ── Store Interface ─────────────────────────────────────────
@@ -197,6 +197,7 @@ function prepareGraph(state: ThreadriftStore, candidate: GraphData, reset = fals
   index = Math.max(0, Math.min(index, route.nodes.length - 1));
   const distance = routeGeometry.nodeDistances[index] ?? 0;
   return { graph, sequences, activePath: route.nodes, activeEdges: route.edges, branchChoices, routeGeometry,
+    mergeModeSource: state.mergeModeSource !== null && graph.nodes[state.mergeModeSource] ? state.mergeModeSource : null,
     scrollCurrent: index, scrollTarget: index, distanceCurrent: distance, distanceTarget: distance,
     inputSession: null, isScrolling: false, travelDirection: 0, graphError: null, graphRevision: state.graphRevision + 1,
     travelledEdges: route.edges.slice(0, index).map((edge) => edge.id) };
@@ -262,7 +263,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     set({ ...prepared, nextNodeId: data.nextNodeId, physics: { ...data.settings.physics },
       autoSaveEnabled: data.settings.editor.autoSaveEnabled,
       extensions: data.extensions, settingsExtensions: data.settings.extensions,
-      selectedNode: data.root, selectedEdge: null, mergeModeSource: null,
+      selectedNode: null, selectedEdge: null, mergeModeSource: null,
       cameraMode: "follow", cameraOverride: null, cameraReturn: null, nodeDragActive: false, editorNotice: null,
       visitedNodes: new Set<number>(), isLoaded: true, hasRecoveryDraft: false,
     });
@@ -281,7 +282,8 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     const parent = getNode(graph, parentId);
     if (!parent) return null;
 
-    if (mode === "branch" && (parent.level ?? 1) >= MAX_BRANCH_DEPTH) return null;
+    const capabilities = getNodeEditCapabilities(graph, parentId);
+    if (mode === "branch" ? !capabilities.canAddBranch : !capabilities.canAddMain) return null;
 
     // Calculate position based on parent tangent
     let dx = 140,
@@ -310,7 +312,6 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     };
 
     const type = mode === "main" ? ("main" as const) : ("branch" as const);
-    if (type === "main" && getMainOutgoing(graph, parentId)) return null;
 
     const newEdge: GraphEdge = {
       id: "e" + crypto.randomUUID(),
@@ -644,7 +645,7 @@ export const createThreadriftStore: StateCreator<ThreadriftStore> = (set, get) =
     get().cancelNodeEdit();
     if (get().editorOpen) get().setCameraMode("follow");
     get().cancelInput();
-    set((s) => ({ editorOpen: !s.editorOpen }));
+    set((s) => ({ editorOpen: !s.editorOpen, mergeModeSource: null }));
   },
   setMergeMode: (sourceId) => { get().cancelNodeEdit(); if (sourceId !== null) get().setCameraMode("follow"); set({ mergeModeSource: sourceId }); },
 

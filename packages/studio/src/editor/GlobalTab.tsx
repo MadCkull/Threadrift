@@ -6,11 +6,6 @@ import {
   Gauge,
   Magnet,
   Timer,
-  RotateCcw,
-  CheckCircle2,
-  Loader2,
-  AlertCircle,
-  Cloud,
 } from "lucide-react";
 
 export function GlobalTab() {
@@ -25,8 +20,6 @@ export function GlobalTab() {
   const hasRecoveryDraft = useThreadrift(s => s.hasRecoveryDraft);
   const restoreDraft = useThreadrift(s => s.restoreDraft);
   const discardDraft = useThreadrift(s => s.discardDraft);
-  const physics = useThreadrift((s) => s.physics);
-  const updatePhysics = useThreadrift((s) => s.updatePhysics);
   const saveStatus = useThreadrift((s) => s.saveStatus);
   const lastSaved = useThreadrift((s) => s.lastSaved);
 
@@ -79,101 +72,6 @@ export function GlobalTab() {
         {reloadStatus && <span className="text-xs text-zinc-400">{reloadStatus}</span>}
       </section>
 
-      {/* Divider */}
-      <div className="h-px bg-white/5" />
-
-      {/* Physics Tuning */}
-      <div className="flex flex-col gap-4">
-        <span className="text-zinc-500 text-xs uppercase tracking-wider">
-          Live Physics Tuning
-        </span>
-
-        <label className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-zinc-400 text-xs">
-              <Gauge className="w-3.5 h-3.5 text-zinc-500" />
-              Scroll Sensitivity
-            </div>
-            <span className="text-[10px] text-zinc-500 font-mono">
-              {physics.scrollSensitivity.toFixed(4)}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0.0002}
-            max={0.005}
-            step={0.0001}
-            value={physics.scrollSensitivity}
-            onChange={(e) =>
-              updatePhysics({ scrollSensitivity: Number(e.target.value) })
-            }
-            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
-              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
-              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
-              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
-          />
-        </label>
-
-        <label className="flex flex-col gap-2">
-          <span className="flex items-center justify-between text-xs text-zinc-400">Touch Sensitivity <span className="text-[10px] font-mono">{physics.touchSensitivity.toFixed(4)}</span></span>
-          <input type="range" min={0.0002} max={0.01} step={0.0001} value={physics.touchSensitivity}
-            onChange={event => updatePhysics({ touchSensitivity: Number(event.target.value) })}
-            className="w-full accent-white" />
-        </label>
-
-        <label className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-zinc-400 text-xs">
-              <Magnet className="w-3.5 h-3.5 text-zinc-500" />
-              Snap Strength
-            </div>
-            <span className="text-[10px] text-zinc-500 font-mono">
-              {physics.snapStrength.toFixed(3)}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0.05}
-            max={0.4}
-            step={0.01}
-            value={physics.snapStrength}
-            onChange={(e) =>
-              updatePhysics({ snapStrength: Number(e.target.value) })
-            }
-            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
-              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
-              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
-              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
-          />
-        </label>
-
-        <label className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-zinc-400 text-xs">
-              <Timer className="w-3.5 h-3.5 text-zinc-500" />
-              Snap Threshold
-            </div>
-            <span className="text-[10px] text-zinc-500 font-mono">
-              {physics.snapThreshold.toFixed(2)}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0.1}
-            max={0.5}
-            step={0.02}
-            value={physics.snapThreshold}
-            onChange={(e) =>
-              updatePhysics({ snapThreshold: Number(e.target.value) })
-            }
-            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
-              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
-              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
-              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
-          />
-        </label>
-      </div>
-
       {/* Graph Stats */}
       <div className="h-px bg-white/5" />
       <GraphStats />
@@ -212,4 +110,107 @@ function StatCard({ label, value }: { label: string; value: number }) {
       </div>
     </div>
   );
+}
+
+export function NavigationSettings() {
+  const physics = useThreadrift(s => s.physics);
+  const updatePhysics = useThreadrift(s => s.updatePhysics);
+  return <>
+      {/* Physics Tuning */}
+      <div className="flex flex-col gap-3">
+        <span className="text-zinc-500 text-xs uppercase tracking-wider">
+          Navigation
+        </span>
+
+        <label className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 text-zinc-400 text-xs">
+              <Gauge className="w-3.5 h-3.5 text-zinc-500" />
+              Scroll Sensitivity
+            </div>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {physics.scrollSensitivity.toFixed(4)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0.0002}
+            max={0.005}
+            step={0.0001}
+            value={physics.scrollSensitivity}
+            onChange={(e) =>
+              updatePhysics({ scrollSensitivity: Number(e.target.value) })
+            }
+            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
+              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="flex items-center justify-between text-xs text-zinc-400">Touch Sensitivity <span className="text-[10px] font-mono">{physics.touchSensitivity.toFixed(4)}</span></span>
+          <input type="range" min={0.0002} max={0.01} step={0.0001} value={physics.touchSensitivity}
+            onChange={event => updatePhysics({ touchSensitivity: Number(event.target.value) })}
+            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
+              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer" />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 text-zinc-400 text-xs">
+              <Magnet className="w-3.5 h-3.5 text-zinc-500" />
+              Snap Strength
+            </div>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {physics.snapStrength.toFixed(3)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0.05}
+            max={0.4}
+            step={0.01}
+            value={physics.snapStrength}
+            onChange={(e) =>
+              updatePhysics({ snapStrength: Number(e.target.value) })
+            }
+            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
+              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 text-zinc-400 text-xs">
+              <Timer className="w-3.5 h-3.5 text-zinc-500" />
+              Snap Threshold
+            </div>
+            <span className="text-[10px] text-zinc-500 font-mono">
+              {physics.snapThreshold.toFixed(2)}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0.1}
+            max={0.5}
+            step={0.02}
+            value={physics.snapThreshold}
+            onChange={(e) =>
+              updatePhysics({ snapThreshold: Number(e.target.value) })
+            }
+            className="w-full accent-white h-1 bg-zinc-800 rounded-full appearance-none cursor-pointer
+              [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 
+              [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white 
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:cursor-pointer"
+          />
+        </label>
+      </div>
+
+
+  </>;
 }
